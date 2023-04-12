@@ -1,5 +1,6 @@
 from lxml.etree import XMLParser, parse
 import os
+import re
 import sys
 from time import time
 from collections import defaultdict
@@ -21,6 +22,26 @@ def read_input_xml(filepath):
     return tree
 
 
+def retrieve_message_properties(child):
+    """Returns message properties to use for uniqueness check.
+
+    Note that this cannot be a shallow analysis, especially for MMS."""
+
+    def omit_smil(s):
+        """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
+        if s.strip().startswith("<smil>") and s.strip().endswith("</smil>"):
+            return "<smil>OMIT\0SMIL\0CONTENTS</smil>"
+        if "<smil>" in s and "</smil>" in s:
+            raise RuntimeError(f"Encountered SMIL data not captured by existing check? {repr(s)}")
+        return s
+
+    def search_for_relevant_fields(element):
+        return tuple((field, omit_smil(element.attrib[field])) for field in ['date', 'address', 'text', 'data']
+                     if field in element.attrib)
+
+    return tuple(item for element in [child] + list(child.iter()) for item in search_for_relevant_fields(element))
+
+
 def parse_message_tree(tree):
     """
     Removes duplicate messages from XML tree and additionally returns original/final message counts.
@@ -32,14 +53,14 @@ def parse_message_tree(tree):
     """
     message_count_by_tag, unique_messages_by_tag = defaultdict(int), defaultdict(set)
     for child in input_tree.getroot().iterchildren():
-        child_tag, child_attributes = child.tag, tuple(child.attrib.items())
+        child_tag, child_attributes = child.tag, retrieve_message_properties(child)
 
         if child_tag not in EXPECTED_XML_TAGS:
             raise ValueError(f"Encountered unexpected XML tag {repr(child_tag)} directly under root. "
                              f"Is the input file malformed?")
 
         if child_attributes in unique_messages_by_tag[child_tag]:
-            tree.remove(child)
+            tree.getroot().remove(child)
         else:
             unique_messages_by_tag[child_tag].add(child_attributes)
         message_count_by_tag[child_tag] += 1
@@ -86,7 +107,7 @@ if __name__ == "__main__":
     if input_message_counts == output_message_counts:
         print(f"No duplicate messages found. Skipping writing of output file.")
     else:
-        print(f"Writing {repr(output_tree)}", end='', flush=True)
+        print(f"Writing {repr(output_fp)}... ", end='', flush=True)
         st = time()
         write_output_xml(output_tree, output_fp)
         print(f"Done in {time() - st:.1f} s")
