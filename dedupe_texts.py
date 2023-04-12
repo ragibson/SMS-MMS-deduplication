@@ -27,19 +27,43 @@ def retrieve_message_properties(child):
 
     Note that this cannot be a shallow analysis, especially for MMS."""
 
-    def omit_smil(s):
+    def contains_smil(s):
         """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
-        if s.strip().startswith("<smil") and s.strip().endswith("</smil>"):
-            return "<smil>OMIT\0SMIL\0CONTENTS</smil>"
+        contains_smil = s.strip().startswith("<smil") and s.strip().endswith("</smil>")
         if "<" in s and ">" in s and "smil" in s and "/smil" in s:
-            raise RuntimeError(f"Encountered SMIL data not captured by existing check? {repr(s)}")
-        return s
+            if not contains_smil:
+                raise RuntimeError(f"Encountered SMIL data not captured by existing check? {repr(s)}")
+        return contains_smil
 
-    def search_for_relevant_fields(element):
-        return tuple((field, omit_smil(element.attrib[field])) for field in ['date', 'address', 'text', 'data']
-                     if field in element.attrib)
+    def standardize_address(field_name, field_data):
+        """Standardize the ordering of the address field."""
+        if field_name == 'address':
+            # for some reason, this field has each number/email/etc. delimited
+            # by '~', but the ordering differs by backup agent
+            field_data = '~'.join(sorted(field_data.split('~')))
+        return field_name, field_data
 
-    return tuple(item for element in [child] + list(child.iter()) for item in search_for_relevant_fields(element))
+    def compile_relevant_fields(element):
+        return tuple(
+            standardize_address(field, element.attrib[field])
+            for field in ['date', 'address', 'body', 'text', 'data']
+            # for some reason, backup agents may either omit fields or fill with null
+            if field in element.attrib and element.attrib[field] != 'null'
+            and not contains_smil(element.attrib[field])
+        )
+
+    result = tuple(item for element in [child] + list(child.iter()) for item in compile_relevant_fields(element))
+    if not result:
+        raise RuntimeError(f"Encountered completely empty message? {result}")
+    return result
+
+
+def message_has_data(message_attributes):
+    return any(field_name == 'data' for field_name, field_value in message_attributes)
+
+
+def strip_data_from_message(message_attributes):
+    return tuple(filter(lambda x: x[0] != 'data', message_attributes))
 
 
 def parse_message_tree(tree):
@@ -52,7 +76,10 @@ def parse_message_tree(tree):
         3) a unique_message_count_by_tag dict
     """
     message_count_by_tag, unique_messages_by_tag = defaultdict(int), defaultdict(set)
-    for child in input_tree.getroot().iterchildren():
+    unique_data_messages_by_tag = defaultdict(set)
+    removal_count = 0
+
+    for child in tree.getroot().iterchildren():
         child_tag, child_attributes = child.tag, retrieve_message_properties(child)
 
         if child_tag not in EXPECTED_XML_TAGS:
@@ -61,9 +88,30 @@ def parse_message_tree(tree):
 
         if child_attributes in unique_messages_by_tag[child_tag]:
             tree.getroot().remove(child)
+            removal_count += 1
         else:
             unique_messages_by_tag[child_tag].add(child_attributes)
+            if message_has_data(child_attributes):
+                unique_data_messages_by_tag[child_tag].add(strip_data_from_message(child_attributes))
+
         message_count_by_tag[child_tag] += 1
+
+    # for some reason, some backup agents create duplicates without MMS
+    # attachments, so we have to check for that failure mode as well
+    for child in input_tree.getroot().iterchildren():
+        child_tag, child_attributes = child.tag, retrieve_message_properties(child)
+        if not message_has_data(child_attributes) and child_attributes in unique_data_messages_by_tag[child_tag]:
+            # this message has a perfect match that also includes data, so we drop it
+            tree.getroot().remove(child)
+            removal_count += 1
+            unique_messages_by_tag[child_tag].remove(child_attributes)
+
+    # sanity check that the bookkeeping is correctly keeping track of removed messages
+    original_total_count = sum(v for v in message_count_by_tag.values())
+    final_total_count = sum(len(v) for v in unique_messages_by_tag.values())
+    if original_total_count - removal_count != final_total_count:
+        raise RuntimeError(f"Removed {removal_count} messages from set of {original_total_count}, but ended up with "
+                           f"inconsistent number of messages {final_total_count}?")
 
     return tree, message_count_by_tag, {k: len(v) for k, v in unique_messages_by_tag.items()}
 
