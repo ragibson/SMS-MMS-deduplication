@@ -29,9 +29,9 @@ def retrieve_message_properties(child):
 
     def omit_smil(s):
         """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
-        if s.strip().startswith("<smil>") and s.strip().endswith("</smil>"):
+        if s.strip().startswith("<smil") and s.strip().endswith("</smil>"):
             return "<smil>OMIT\0SMIL\0CONTENTS</smil>"
-        if "<smil>" in s and "</smil>" in s:
+        if "<" in s and ">" in s and "smil" in s and "/smil" in s:
             raise RuntimeError(f"Encountered SMIL data not captured by existing check? {repr(s)}")
         return s
 

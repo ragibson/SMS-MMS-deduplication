@@ -3,6 +3,9 @@
 This is a simple tool to remove duplicate text messages from XML backups of
 the "SMS Backup & Restore" format.
 
+Note: I am still performing some experiments to test the differences between
+various backup agents from my personal use case.
+
 ## Usage
 
 The usage of this tool is extremely simple and can handle files of several
