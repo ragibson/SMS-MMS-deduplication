@@ -1,19 +1,21 @@
 from lxml.etree import XMLParser, parse
 import os
-import re
 import sys
 from time import time
 from collections import defaultdict
 
-EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any child tags other than this as a fatal error
+EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
+RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
 
 
 def simple_read_argv():
     """Reads sys.argv naively and returns input_filepath, output_filepath."""
     if len(sys.argv) < 2:
-        print(f"Usage: python3 dedupe_texts.py input_file [output_file]")
+        print(f"Usage: python3 dedupe_texts.py input_file [output_file [log_file]]")
         exit()
-    return sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "_deduplicated".join(os.path.splitext(sys.argv[1]))
+    return (sys.argv[1],
+            sys.argv[2] if len(sys.argv) > 2 else "_deduplicated".join(os.path.splitext(sys.argv[1])),
+            sys.argv[3] if len(sys.argv) > 3 else f"{os.path.splitext(sys.argv[1])[0]}_deduplication.log")
 
 
 def read_input_xml(filepath):
@@ -46,7 +48,7 @@ def retrieve_message_properties(child):
     def compile_relevant_fields(element):
         return tuple(
             standardize_address(field, element.attrib[field])
-            for field in ['date', 'address', 'body', 'text', 'data']
+            for field in RELEVANT_FIELDS
             # for some reason, backup agents may either omit fields or fill with null
             if field in element.attrib and element.attrib[field] != 'null'
             and not contains_smil(element.attrib[field])
@@ -66,7 +68,25 @@ def strip_data_from_message(message_attributes):
     return tuple(filter(lambda x: x[0] != 'data', message_attributes))
 
 
-def parse_message_tree(tree):
+def removal_summary(element_tag, element_to_remove, element_to_keep, field_length_limit=1000):
+    def collect_unique_field_data(element_attributes, field):
+        return " | ".join(sorted({field_data if len(field_data) < field_length_limit
+                                  else f"<LENGTH {len(field_data)} OMISSION>"
+                                  for field_name, field_data in element_attributes if field == field_name}))
+
+    removal_log = []
+    for intro_str, element in [(f"Removing {element_tag}:", element_to_remove),
+                               (f"\nIn favor of keeping {element_tag}:", element_to_keep)]:
+        removal_log.append(intro_str)
+        for field in RELEVANT_FIELDS:
+            combined_field_data = collect_unique_field_data(element, field)
+            if combined_field_data:
+                removal_log.append(f"{field:>8}: {combined_field_data}")
+
+    return "\n".join(removal_log) + "\n\n"
+
+
+def parse_message_tree(tree, log_file):
     """
     Removes duplicate messages from XML tree and additionally returns original/final message counts.
 
@@ -76,8 +96,15 @@ def parse_message_tree(tree):
         3) a unique_message_count_by_tag dict
     """
     message_count_by_tag, unique_messages_by_tag = defaultdict(int), defaultdict(set)
-    unique_data_messages_by_tag = defaultdict(set)
+    data_stripped_by_tag = defaultdict(set)  # tag -> message attributes without data fields
+    data_stripped_to_original = {}  # message attributes without data fields -> original attributes
     removal_count = 0
+
+    def remove_element(element, element_tag, element_attributes, attribute_match):
+        nonlocal removal_count, tree
+        tree.getroot().remove(element)
+        log_file.write(removal_summary(element_tag, element_attributes, attribute_match))
+        removal_count += 1
 
     for child in tree.getroot().iterchildren():
         child_tag, child_attributes = child.tag, retrieve_message_properties(child)
@@ -87,12 +114,14 @@ def parse_message_tree(tree):
                              f"Is the input file malformed?")
 
         if child_attributes in unique_messages_by_tag[child_tag]:
-            tree.getroot().remove(child)
-            removal_count += 1
+            # this message has a perfect match, so we drop it
+            remove_element(child, child_tag, child_attributes, child_attributes)
         else:
             unique_messages_by_tag[child_tag].add(child_attributes)
-            if message_has_data(child_attributes):
-                unique_data_messages_by_tag[child_tag].add(strip_data_from_message(child_attributes))
+            if message_has_data(child_attributes):  # only fill in the data stripping info for messages with data
+                data_stripped_attributes = strip_data_from_message(child_attributes)
+                data_stripped_by_tag[child_tag].add(data_stripped_attributes)
+                data_stripped_to_original[data_stripped_attributes] = child_attributes
 
         message_count_by_tag[child_tag] += 1
 
@@ -100,10 +129,9 @@ def parse_message_tree(tree):
     # attachments, so we have to check for that failure mode as well
     for child in input_tree.getroot().iterchildren():
         child_tag, child_attributes = child.tag, retrieve_message_properties(child)
-        if not message_has_data(child_attributes) and child_attributes in unique_data_messages_by_tag[child_tag]:
+        if not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
             # this message has a perfect match that also includes data, so we drop it
-            tree.getroot().remove(child)
-            removal_count += 1
+            remove_element(child, child_tag, child_attributes, data_stripped_to_original[child_attributes])
             unique_messages_by_tag[child_tag].remove(child_attributes)
 
     # sanity check that the bookkeeping is correctly keeping track of removed messages
@@ -134,7 +162,7 @@ def write_output_xml(tree, filepath):
 
 if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
-    input_fp, output_fp = simple_read_argv()
+    input_fp, output_fp, log_fp = simple_read_argv()
 
     # read entire input XML file
     print(f"Reading {repr(input_fp)}... ", end='', flush=True)
@@ -143,9 +171,11 @@ if __name__ == "__main__":
     print(f"Done in {time() - st:.1f} s.")
 
     # search for duplicate messages and remove them from the XML tree
-    print(f"Searching for duplicates... ", end='', flush=True)
-    st = time()
-    output_tree, input_message_counts, output_message_counts = parse_message_tree(input_tree)
+    print(f"Preparing log file {repr(log_fp)}.")
+    with open(log_fp, "w") as log_file:
+        print(f"Searching for duplicates... ", end='', flush=True)
+        st = time()
+        output_tree, input_message_counts, output_message_counts = parse_message_tree(input_tree, log_file)
     print(f"Done in {time() - st:.1f} s.")
 
     # print summary of original and final message counts
