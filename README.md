@@ -3,12 +3,20 @@
 This is a simple tool to remove duplicate text messages from XML backups of
 the "SMS Backup & Restore" format.
 
-It also supports removal of more complicated duplicates than other tools.
+It also supports removal of more complicated duplicates than other tools while
+taking extreme care not to identify any false positives.
 
-* Those created due to conflicts arising from multiple backup agents being
-  used simultaneously (e.g., accidentally recovering data from Google's
-  backups ***and*** Samsung's backups)
-* Duplicates where one contains a data attachment, but another does not
+For example, we handle instances where
+
+* One message contains a data attachment, but the other does not
+* The internal ordering of phone numbers is inconsistent between messages
+* The internal [SMIL data](https://en.wikipedia.org/wiki/Synchronized_Multimedia_Integration_Language)
+  format varies, but the message content and data are otherwise identical
+* The internal storage fields are inconsistently omitted or `null`
+
+These conflicts tend to occur when using multiple backup agents over time or
+simultaneously. E.g., accidentally recovering data from Google's backups
+***and*** Samsung's backups or simply changing manufacturers or carriers.
 
 ## Usage
 

@@ -69,6 +69,12 @@ def strip_data_from_message(message_attributes):
 
 
 def removal_summary(element_tag, element_to_remove, element_to_keep, field_length_limit=1000):
+    """
+    Returns a string of the removed message details for logging purposes.
+
+    Alongside the duplicate (removed) message, it logs the message that was kept in its place.
+    """
+
     def collect_unique_field_data(element_attributes, field):
         return " | ".join(sorted({field_data if len(field_data) < field_length_limit
                                   else f"<LENGTH {len(field_data)} OMISSION>"
@@ -86,7 +92,7 @@ def removal_summary(element_tag, element_to_remove, element_to_keep, field_lengt
     return "\n".join(removal_log) + "\n\n"
 
 
-def parse_message_tree(tree, log_file):
+def deduplicate_messages_in_tree(tree, log_file):
     """
     Removes duplicate messages from XML tree and additionally returns original/final message counts.
 
@@ -145,6 +151,7 @@ def parse_message_tree(tree, log_file):
 
 
 def print_summary(input_message_counts, output_message_counts):
+    """Prints summary of deduplicated message counts to stdout."""
     if input_message_counts.keys() != output_message_counts.keys():
         raise RuntimeError(f"Message type (MMS/SMS) was completely lost in deduplication? This should never occur!")
 
@@ -153,6 +160,23 @@ def print_summary(input_message_counts, output_message_counts):
     for message_tag in input_message_counts.keys() | output_message_counts:
         original_count, final_count = input_message_counts[message_tag], output_message_counts[message_tag]
         print("|".join(f"{x:^20}" for x in [message_tag, original_count, original_count - final_count, final_count]))
+
+
+def rewrite_tree_ids_and_count(tree, new_total):
+    """
+    Rewrites (MMS) message IDs in the XML tree and total message count in the backup.
+
+    Without these, backup utilities may fail to restore the file (falsely believing
+    that they have somehow skipped over messages or that the file itself is corrupt).
+    """
+    running_id = 0
+    for it in tree.iter():
+        if it.tag == 'smses':
+            it.attrib["count"] = str(new_total)
+
+        if "_id" in it.attrib:
+            it.attrib["_id"] = str(running_id)
+            running_id += 1
 
 
 def write_output_xml(tree, filepath):
@@ -175,8 +199,11 @@ if __name__ == "__main__":
     with open(log_fp, "w") as log_file:
         print(f"Searching for duplicates... ", end='', flush=True)
         st = time()
-        output_tree, input_message_counts, output_message_counts = parse_message_tree(input_tree, log_file)
+        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(input_tree, log_file)
     print(f"Done in {time() - st:.1f} s.")
+
+    # rewrite message count and ID numbers in XML tree
+    rewrite_tree_ids_and_count(output_tree, sum(count for tag, count in output_message_counts.items()))
 
     # print summary of original and final message counts
     print_summary(input_message_counts, output_message_counts)
