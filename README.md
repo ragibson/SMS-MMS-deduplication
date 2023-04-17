@@ -8,7 +8,8 @@ taking extreme care not to identify any false positives.
 
 For example, we handle instances where
 
-* One message contains a data attachment, but the other does not
+* One message contains a data attachment (e.g., images sent via text message),
+  but the other does not
 * The internal ordering of phone numbers is inconsistent between messages
 * The internal [SMIL data](https://en.wikipedia.org/wiki/Synchronized_Multimedia_Integration_Language)
   format varies, but the message content and data are otherwise identical
@@ -16,7 +17,11 @@ For example, we handle instances where
 
 These conflicts tend to occur when using multiple backup agents over time or
 simultaneously. E.g., accidentally recovering data from Google's backups
-***and*** Samsung's backups or simply changing manufacturers or carriers.
+*and* Samsung's backups or simply changing manufacturers or carriers.
+
+If you intend to use this to remove duplicated messages on your device (rather
+than in your backup location), please read ["An important warning about
+deduplicating messages *on a device* in practice"](#ImportantWarning).
 
 ## Usage
 
@@ -75,6 +80,50 @@ In favor of keeping mms:
     type: 137 | 151
     data: <LENGTH 539706 OMISSION>
 ```
+
+<a name = "ImportantWarning"></a>
+
+## An important warning about deduplicating messages *on a device* in practice
+
+Note that
+
+* SMS Backup & Restore avoids restoring duplicates by default, and
+* Most messaging clients/apps actually hide deleted conversations before they
+  are deleted internally (they continue the deletion work in the background)
+
+Thus, if you flag conversations for deletion and then start restoring from
+backup (without verifying the message deletion has completed internally),
+***you may lose messages!***
+
+In these cases, the backup restoration essentially detects duplicates of
+messages that were mid-deletion and only completes a partial restore. E.g.,
+
+* With duplicates where some messages have data attachments and others do not,
+  you may lose images, shared contacts, etc. from text messages
+* Some messaging clients may continue the deletion after the backup is
+  restored, in which case you will simply lose entire messages or conversations
+
+With this in mind, to deduplicate messages on a device itself, you should
+
+1) Perform the backup and deduplicate it (retain both versions, just in case)
+2) Confirm you have not received any new messages in the meantime (consider
+   using airplane mode)
+3) Mass-delete your text messages
+4) Wait a few minutes (the time required depends on your phone's processing
+   speed, the number of messages, etc.)
+5) Clear your messaging client's data (`App Info > Storage > Clear Data`) to
+   force a refresh of the text message view
+6) Confirm that no messages appear in the view. Otherwise, return to step #2
+7) Restore from the deduplicated backup and verify that all messages were
+   restored before removing the original (non-deduplicated) backup file
+
+For step #7, consider keeping the restoration's duplicate check enabled. If it
+detects *any* duplicates when restoring to a phone that appears to have zero
+existing text messages, that should be a *major* warning that something has
+gone wrong.
+
+Moreover, if you create a new backup afterward, it should not be much smaller
+than the one you restored from!
 
 ## Related Work
 
