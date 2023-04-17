@@ -9,7 +9,13 @@ RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type
 
 
 def simple_read_argv():
-    """Reads sys.argv naively and returns input_filepath, output_filepath."""
+    """
+    Reads sys.argv naively and returns input_filepath, output_filepath, log_filepath.
+
+    By default,
+      * the output filepath is the input filepath with "_deduplicated" appended to the filename
+      * the log filepath is the input filepath with "_deduplication.log" appended to the filename
+    """
     if len(sys.argv) < 2:
         print(f"Usage: python3 dedupe_texts.py input_file [output_file [log_file]]")
         exit()
@@ -25,9 +31,11 @@ def read_input_xml(filepath):
 
 
 def retrieve_message_properties(child):
-    """Returns message properties to use for uniqueness check.
+    """
+    Returns message properties to use for uniqueness check.
 
-    Note that this cannot be a shallow analysis, especially for MMS."""
+    Note that this cannot be a shallow analysis, especially for MMS.
+    """
 
     def contains_smil(s):
         """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
