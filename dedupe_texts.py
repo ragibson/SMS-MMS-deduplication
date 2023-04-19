@@ -141,7 +141,7 @@ def deduplicate_messages_in_tree(tree, log_file):
 
     # for some reason, some backup agents create duplicates without MMS
     # attachments, so we have to check for that failure mode as well
-    for child in input_tree.getroot().iterchildren():
+    for child in tree.getroot().iterchildren():
         child_tag, child_attributes = child.tag, retrieve_message_properties(child)
         if not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
             # this message has a perfect match that also includes data, so we drop it
