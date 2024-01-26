@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     # search for duplicate messages and remove them from the XML tree
     print(f"Preparing log file {repr(log_fp)}.")
-    with open(log_fp, "w") as log_file:
+    with open(log_fp, "w", encoding="utf-8") as log_file:
         print(f"Searching for duplicates... ", end='', flush=True)
         st = time()
         output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(input_tree, log_file)
