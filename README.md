@@ -10,6 +10,8 @@ For example, we handle instances where
 
 * One message contains a data attachment (e.g., images sent via text message),
   but the other does not
+* The phone numbers inconsistently include or exclude country codes
+* The internal timestamps have inconsistent millisecond vs. second precision
 * The internal ordering of phone numbers is inconsistent between messages
 * The internal [SMIL data](https://en.wikipedia.org/wiki/Synchronized_Multimedia_Integration_Language)
   format varies, but the message content and data are otherwise identical
