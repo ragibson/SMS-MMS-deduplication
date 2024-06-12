@@ -7,7 +7,8 @@ from time import time
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
-TRUNCATING_DATE_PRECISION = False  # whether to ignore millisecond precision, controlled by simple_read_argv()
+TRUNCATING_DATE_PRECISION = False  # whether to ignore millisecond precision
+DEFAULT_COUNTRY_CODE = None  # default country code to use when detecting duplicates
 
 
 def parse_arguments():
@@ -29,6 +30,10 @@ def parse_arguments():
     parser.add_argument('--ignore-date-milliseconds', action='store_true',
                         help='Ignore millisecond precision in dates if timestamps are slightly inconsistent. '
                              'Treat identical messages as duplicates if received in the same second.')
+    parser.add_argument('--default-country-code', nargs='?', default="+1",
+                        help='Default country code to assume if a phone number has no country code. '
+                             'Treat phone numbers as identical if they include this country code or none at all. '
+                             'Defaults to +1 (United States / Canada).')
 
     args = parser.parse_args()
 
@@ -65,6 +70,9 @@ def retrieve_message_properties(child):
     def standardize_address(field_name, field_data):
         """Standardize the ordering of the address field."""
         if field_name == 'address':
+            # some backup agents conflict on whether they assume a default country code or explicitly include it
+            field_data = '~'.join(f'{DEFAULT_COUNTRY_CODE}{address}' if not address.startswith('+') else address
+                                  for address in field_data.split('~'))
             # for some reason, this field has each number/email/etc. delimited
             # by '~', but the ordering differs by backup agent
             field_data = '~'.join(sorted(field_data.split('~')))
@@ -227,6 +235,9 @@ if __name__ == "__main__":
 
     if args.ignore_date_milliseconds:
         TRUNCATING_DATE_PRECISION = True
+
+    if args.default_country_code:
+        DEFAULT_COUNTRY_CODE = args.default_country_code
 
     # read entire input XML file
     print(f"Reading {repr(input_fp)}... ", end='', flush=True)

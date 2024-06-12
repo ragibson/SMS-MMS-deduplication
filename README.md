@@ -34,10 +34,11 @@ For example,
 python3 dedupe_texts.py example-input.xml example-output.xml deduplication-results.log
 ```
 
-The full usage information is below.
+The full usage information with a few optional features is below.
 
 ```
 usage: dedupe_texts.py [-h] [--ignore-date-milliseconds]
+                       [--default-country-code [DEFAULT_COUNTRY_CODE]]
                        input_file [output_file] [log_file]
 
 Deduplicate text messages from XML backup.
@@ -57,6 +58,11 @@ options:
                         Ignore millisecond precision in dates if timestamps
                         are slightly inconsistent. Treat identical messages as
                         duplicates if received in the same second.
+  --default-country-code [DEFAULT_COUNTRY_CODE]
+                        Default country code to assume if a phone number has
+                        no country code. Treat phone numbers as identical if
+                        they include this country code or none at all.
+                        Defaults to +1 (United States / Canada).
 ```
 
 ### Console Output
