@@ -1,27 +1,44 @@
-from lxml.etree import XMLParser, parse
+import argparse
 import os
 import sys
-from time import time
 from collections import defaultdict
+from lxml.etree import XMLParser, parse
+from time import time
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
+TRUNCATING_DATE_PRECISION = False  # whether to ignore millisecond precision, controlled by simple_read_argv()
 
 
-def simple_read_argv():
+def parse_arguments():
     """
-    Reads sys.argv naively and returns input_filepath, output_filepath, log_filepath.
+    Reads CLI arguments and return set of arguments.
 
     By default,
       * the output filepath is the input filepath with "_deduplicated" appended to the filename
       * the log filepath is the input filepath with "_deduplication.log" appended to the filename
     """
-    if len(sys.argv) < 2:
-        print(f"Usage: python3 dedupe_texts.py input_file [output_file [log_file]]")
-        exit()
-    return (sys.argv[1],
-            sys.argv[2] if len(sys.argv) > 2 else "_deduplicated".join(os.path.splitext(sys.argv[1])),
-            sys.argv[3] if len(sys.argv) > 3 else f"{os.path.splitext(sys.argv[1])[0]}_deduplication.log")
+    parser = argparse.ArgumentParser(description='Deduplicate text messages from XML backup.')
+    parser.add_argument('input_file', type=str, help='The input XML to deduplicate.')
+    parser.add_argument('output_file', type=str, nargs='?',
+                        help='The output file to save deduplicated entries. '
+                             'Defaults to the input filepath with "_deduplicated" appended to the filename.')
+    parser.add_argument('log_file', type=str, nargs='?',
+                        help='The log file to record details of each removed message. '
+                             'Defaults to the input filepath with "_deduplication.log" appended to the filename.')
+    parser.add_argument('--ignore-date-milliseconds', action='store_true',
+                        help='Ignore millisecond precision in dates if timestamps are slightly inconsistent. '
+                             'Treat identical messages as duplicates if received in the same second.')
+
+    args = parser.parse_args()
+
+    if not args.output_file:
+        args.output_file = "_deduplicated".join(os.path.splitext(sys.argv[1]))
+
+    if not args.log_file:
+        args.log_file = f"{os.path.splitext(sys.argv[1])[0]}_deduplication.log"
+
+    return args
 
 
 def read_input_xml(filepath):
@@ -51,11 +68,22 @@ def retrieve_message_properties(child):
             # for some reason, this field has each number/email/etc. delimited
             # by '~', but the ordering differs by backup agent
             field_data = '~'.join(sorted(field_data.split('~')))
-        return field_name, field_data
+        return field_data
+
+    def truncate_timestamp_precision(field_name, field_data):
+        """
+        Truncate timestamp precision to seconds.
+
+        This is only for internal duplicate checking and does not affect the XML export.
+        """
+        if field_name == 'date' and TRUNCATING_DATE_PRECISION:
+            # for some reason, some backup agents drop the millisecond precision here
+            field_data = field_data[:-3] + "000"
+        return field_data
 
     def compile_relevant_fields(element):
         return tuple(
-            standardize_address(field, element.attrib[field])
+            (field, standardize_address(field, truncate_timestamp_precision(field, element.attrib[field])))
             for field in RELEVANT_FIELDS
             # for some reason, backup agents may either omit fields or fill with null
             if field in element.attrib and element.attrib[field] != 'null'
@@ -194,7 +222,11 @@ def write_output_xml(tree, filepath):
 
 if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
-    input_fp, output_fp, log_fp = simple_read_argv()
+    args = parse_arguments()
+    input_fp, output_fp, log_fp = args.input_file, args.output_file, args.log_file
+
+    if args.ignore_date_milliseconds:
+        TRUNCATING_DATE_PRECISION = True
 
     # read entire input XML file
     print(f"Reading {repr(input_fp)}... ", end='', flush=True)

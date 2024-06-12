@@ -28,8 +28,35 @@ deduplicating messages *on a device* in practice"](#ImportantWarning).
 The usage of this tool is extremely simple and can handle files of several
 gigabytes in a few seconds.
 
+For example,
+
+```commandline
+python3 dedupe_texts.py example-input.xml example-output.xml deduplication-results.log
 ```
-Usage: python3 dedupe_texts.py input_file [output_file [log_file]]
+
+The full usage information is below.
+
+```
+usage: dedupe_texts.py [-h] [--ignore-date-milliseconds]
+                       input_file [output_file] [log_file]
+
+Deduplicate text messages from XML backup.
+
+positional arguments:
+  input_file            The input XML to deduplicate.
+  output_file           The output file to save deduplicated entries. Defaults
+                        to the input filepath with "_deduplicated" appended to
+                        the filename.
+  log_file              The log file to record details of each removed
+                        message. Defaults to the input filepath with
+                        "_deduplication.log" appended to the filename.
+
+options:
+  -h, --help            show this help message and exit
+  --ignore-date-milliseconds
+                        Ignore millisecond precision in dates if timestamps
+                        are slightly inconsistent. Treat identical messages as
+                        duplicates if received in the same second.
 ```
 
 ### Console Output
