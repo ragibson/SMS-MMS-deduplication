@@ -148,7 +148,7 @@ def removal_summary(element_to_remove, element_to_keep, args, field_length_limit
 
     Alongside the duplicate (removed) message, it logs the message that was kept in its place.
     """
-    element_tag = element_to_remove.tag
+    tag_remove, tag_keep = element_to_remove.tag, element_to_keep.tag
     element_to_remove = retrieve_message_properties(element_to_remove, args, disable_ignores=True)
     element_to_keep = retrieve_message_properties(element_to_keep, args, disable_ignores=True)
 
@@ -158,8 +158,8 @@ def removal_summary(element_to_remove, element_to_keep, args, field_length_limit
                                   for field_name, field_data in element_attributes if field == field_name}))
 
     removal_log = []
-    for intro_str, element in [(f"Removing {element_tag}:", element_to_remove),
-                               (f"\nIn favor of keeping {element_tag}:", element_to_keep)]:
+    for intro_str, element in [(f"Removing {tag_remove}:", element_to_remove),
+                               (f"\nIn favor of keeping {tag_keep}:", element_to_keep)]:
         removal_log.append(intro_str)
         for field in RELEVANT_FIELDS:
             combined_field_data = collect_unique_field_data(element, field)
