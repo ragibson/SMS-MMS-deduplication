@@ -1,3 +1,7 @@
+# Any deduplication or log files
+*_deduplicated.xml
+*_deduplication.log
+
 # PyCharm IDE files
 .idea
 

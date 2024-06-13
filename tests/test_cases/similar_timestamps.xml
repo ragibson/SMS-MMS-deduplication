@@ -1,0 +1,51 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<smses count="8" type="full">
+    <sms protocol="0" address="+11111111111" date="1600000001234" type="1" subject="null"
+         body="Some text content here"/>
+    <sms protocol="0" address="+11111111111" date="1600000000345" type="1" subject="null"
+         body="Some text content here"/>
+    <sms protocol="0" address="+11111111111" date="1600000001000" type="1" subject="null"
+         body="Some text content here"/>
+    <sms protocol="0" address="+11111111111" date="1600000001789" type="1" subject="null"
+         body="Some text content here"/>
+    <mms date="1700000001234" address="+11111111111~+11111111112">
+        <parts>
+            <part seq="0" ct="text/plain" name="null" chset="106"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="+11111111111" type="151" charset="106"/>
+            <addr address="+11111111112" type="151" charset="106"/>
+        </addrs>
+    </mms>
+    <mms date="1700000000345" address="+11111111111~+11111111112">
+        <parts>
+            <part seq="0" ct="text/plain" name="null" chset="106"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="+11111111111" type="151" charset="106"/>
+            <addr address="+11111111112" type="151" charset="106"/>
+        </addrs>
+    </mms>
+    <mms date="1700000001000" address="+11111111111~+11111111112">
+        <parts>
+            <part seq="0" ct="text/plain" name="null" chset="106"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="+11111111111" type="151" charset="106"/>
+            <addr address="+11111111112" type="151" charset="106"/>
+        </addrs>
+    </mms>
+    <mms date="1700000001789" address="+11111111111~+11111111112">
+        <parts>
+            <part seq="0" ct="text/plain" name="null" chset="106"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="+11111111111" type="151" charset="106"/>
+            <addr address="+11111111112" type="151" charset="106"/>
+        </addrs>
+    </mms>
+</smses>

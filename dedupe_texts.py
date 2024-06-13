@@ -2,8 +2,9 @@ import argparse
 import os
 import sys
 from collections import defaultdict
-from lxml.etree import XMLParser, parse
 from time import time
+
+from lxml.etree import XMLParser, parse
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']

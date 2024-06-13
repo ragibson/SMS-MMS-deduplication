@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<smses count="2" type="full">
+    <mms date="1600000001000" address="+11111111111">
+        <parts>
+            <part seq="-1" ct="application/smil" text='&lt;smil&gt;OMIT;&lt;/smil&gt;'/>
+            <part seq="0" ct="text/plain" chset="106" text="Some text content here"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="1111111111" type="151" charset="106"/>
+        </addrs>
+    </mms>
+    <sms protocol="0" address="+11111111111" date="1600000001000" type="1" subject="null"
+         body="Some text content here"/>
+</smses>
+
