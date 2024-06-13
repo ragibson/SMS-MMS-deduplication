@@ -25,7 +25,7 @@ If you intend to use this to remove duplicated messages on your device (rather
 than in your backup location), please read ["An important warning about
 deduplicating messages *on a device* in practice"](#ImportantWarning).
 
-## Usage
+## Simple Usage
 
 The usage of this tool is extremely simple and can handle files of several
 gigabytes in a few seconds.
@@ -34,37 +34,6 @@ For example,
 
 ```commandline
 python3 dedupe_texts.py example-input.xml example-output.xml deduplication-results.log
-```
-
-The full usage information with a few optional features is below.
-
-```
-usage: dedupe_texts.py [-h] [--ignore-date-milliseconds]
-                       [--default-country-code [DEFAULT_COUNTRY_CODE]]
-                       input_file [output_file] [log_file]
-
-Deduplicate text messages from XML backup.
-
-positional arguments:
-  input_file            The input XML to deduplicate.
-  output_file           The output file to save deduplicated entries. Defaults
-                        to the input filepath with "_deduplicated" appended to
-                        the filename.
-  log_file              The log file to record details of each removed
-                        message. Defaults to the input filepath with
-                        "_deduplication.log" appended to the filename.
-
-options:
-  -h, --help            show this help message and exit
-  --ignore-date-milliseconds
-                        Ignore millisecond precision in dates if timestamps
-                        are slightly inconsistent. Treat identical messages as
-                        duplicates if received in the same second.
-  --default-country-code [DEFAULT_COUNTRY_CODE]
-                        Default country code to assume if a phone number has
-                        no country code. Treat phone numbers as identical if
-                        they include this country code or none at all.
-                        Defaults to +1 (United States / Canada).
 ```
 
 ### Console Output
@@ -114,6 +83,48 @@ In favor of keeping mms:
   m_type: 128
     type: 137 | 151
     data: <LENGTH 539706 OMISSION>
+```
+
+### Full Usage Details
+
+The full usage information with a few optional features is below.
+
+```
+usage: dedupe_texts.py [-h] [--default-country-code [DEFAULT_COUNTRY_CODE]]
+                       [--ignore-date-milliseconds]
+                       [--ignore-whitespace-differences] [--aggressive]
+                       input_file [output_file] [log_file]
+
+Deduplicate text messages from XML backup.
+
+positional arguments:
+  input_file            The input XML to deduplicate.
+  output_file           The output file to save deduplicated entries. Defaults
+                        to the input filepath with "_deduplicated" appended to
+                        the filename.
+  log_file              The log file to record details of each removed
+                        message. Defaults to the input filepath with
+                        "_deduplication.log" appended to the filename.
+
+options:
+  -h, --help            show this help message and exit
+  --default-country-code [DEFAULT_COUNTRY_CODE]
+                        Default country code to assume if a phone number has
+                        no country code. Treat phone numbers as identical if
+                        they include this country code or none at all.
+                        Defaults to +1 (United States / Canada).
+  --ignore-date-milliseconds
+                        Ignore millisecond precision in dates if timestamps
+                        are slightly inconsistent. Treat identical messages as
+                        duplicates if received in the same second.
+  --ignore-whitespace-differences
+                        Ignore whitespace differences in text messages. Treat
+                        identical messages as duplicates if they differ only
+                        in the type of whitespace or leading/trailing spaces.
+  --aggressive          Only consider timestamp and body/text/data in
+                        identifying duplicates. Treat any matching messages as
+                        duplicates, regardless of address, messaging protocol
+                        (SMS, MMS, RCS, etc.), or other fields.
 ```
 
 <a name = "ImportantWarning"></a>

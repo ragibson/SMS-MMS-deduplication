@@ -7,6 +7,7 @@ from time import time
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
+AGGRESSIVE_RELEVANT_FIELDS = ['date', 'body', 'text', 'data']
 
 
 def parse_arguments():
@@ -35,6 +36,10 @@ def parse_arguments():
     parser.add_argument('--ignore-whitespace-differences', action='store_true',
                         help='Ignore whitespace differences in text messages. Treat identical messages as duplicates '
                              'if they differ only in the type of whitespace or leading/trailing spaces.')
+    parser.add_argument('--aggressive', action='store_true',
+                        help='Only consider timestamp and body/text/data in identifying duplicates. Treat any matching '
+                             'messages as duplicates, regardless of address, messaging protocol (SMS, MMS, RCS, etc.), '
+                             'or other fields.')
 
     args = parser.parse_args()
 
@@ -109,9 +114,13 @@ def retrieve_message_properties(child, args):
         return field_name, field_data
 
     def compile_relevant_fields(element):
+        relevant_deduplication_fields = RELEVANT_FIELDS
+        if args.aggressive:
+            relevant_deduplication_fields = AGGRESSIVE_RELEVANT_FIELDS
+
         return tuple(
             normalize_field(field, element.attrib[field])
-            for field in RELEVANT_FIELDS
+            for field in relevant_deduplication_fields
             # for some reason, backup agents may either omit fields or fill with null
             if field in element.attrib and element.attrib[field] != 'null'
             and not contains_smil(element.attrib[field])
@@ -175,6 +184,14 @@ def deduplicate_messages_in_tree(tree, log_file):
         if child_tag not in EXPECTED_XML_TAGS:
             raise ValueError(f"Encountered unexpected XML tag {repr(child_tag)} directly under root. "
                              f"Is the input file malformed?")
+
+        if args.aggressive:
+            assert len(AGGRESSIVE_RELEVANT_FIELDS) == 4  # sanity check this is date plus text/body/data
+            child_tag = ' or '.join(EXPECTED_XML_TAGS)  # ignore message type
+
+            # treat text/body identically
+            child_attributes = tuple({('text' if x[0] in ('text', 'body') else x[0],) + x[1:]
+                                      for x in child_attributes})
 
         return child_tag, child_attributes
 
