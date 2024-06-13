@@ -7,8 +7,6 @@ from time import time
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
-TRUNCATING_DATE_PRECISION = False  # whether to ignore millisecond precision
-DEFAULT_COUNTRY_CODE = None  # default country code to use when detecting duplicates
 
 
 def parse_arguments():
@@ -27,13 +25,16 @@ def parse_arguments():
     parser.add_argument('log_file', type=str, nargs='?',
                         help='The log file to record details of each removed message. '
                              'Defaults to the input filepath with "_deduplication.log" appended to the filename.')
-    parser.add_argument('--ignore-date-milliseconds', action='store_true',
-                        help='Ignore millisecond precision in dates if timestamps are slightly inconsistent. '
-                             'Treat identical messages as duplicates if received in the same second.')
     parser.add_argument('--default-country-code', nargs='?', default="+1",
                         help='Default country code to assume if a phone number has no country code. '
                              'Treat phone numbers as identical if they include this country code or none at all. '
                              'Defaults to +1 (United States / Canada).')
+    parser.add_argument('--ignore-date-milliseconds', action='store_true',
+                        help='Ignore millisecond precision in dates if timestamps are slightly inconsistent. '
+                             'Treat identical messages as duplicates if received in the same second.')
+    parser.add_argument('--ignore-whitespace-differences', action='store_true',
+                        help='Ignore whitespace differences in text messages. Treat identical messages as duplicates '
+                             'if they differ only in the type of whitespace or leading/trailing spaces.')
 
     args = parser.parse_args()
 
@@ -52,7 +53,7 @@ def read_input_xml(filepath):
     return tree
 
 
-def retrieve_message_properties(child):
+def retrieve_message_properties(child, args):
     """
     Returns message properties to use for uniqueness check.
 
@@ -71,7 +72,7 @@ def retrieve_message_properties(child):
         """Standardize the ordering of the address field."""
         if field_name == 'address':
             # some backup agents conflict on whether they assume a default country code or explicitly include it
-            field_data = '~'.join(f'{DEFAULT_COUNTRY_CODE}{address}' if not address.startswith('+') else address
+            field_data = '~'.join(f'{args.default_country_code}{address}' if not address.startswith('+') else address
                                   for address in field_data.split('~'))
             # for some reason, this field has each number/email/etc. delimited
             # by '~', but the ordering differs by backup agent
@@ -80,18 +81,36 @@ def retrieve_message_properties(child):
 
     def truncate_timestamp_precision(field_name, field_data):
         """
-        Truncate timestamp precision to seconds.
+        If enabled, truncate timestamp precision to seconds.
 
         This is only for internal duplicate checking and does not affect the XML export.
         """
-        if field_name == 'date' and TRUNCATING_DATE_PRECISION:
+        if field_name == 'date' and args.ignore_date_milliseconds:
             # for some reason, some backup agents drop the millisecond precision here
             field_data = field_data[:-3] + "000"
         return field_data
 
+    def normalize_whitespace(field_name, field_data):
+        """
+        If enabled, replace all whitespace in a text with a single space.
+
+        This is only for internal duplicate checking and does not affect the XML export.
+        """
+        if field_name in ('text', 'body', 'subject') and args.ignore_whitespace_differences:
+            # in rare cases, backup agents may tweak whitespace within text messages
+            field_data = " ".join(field_data.strip().split())
+        return field_data
+
+    def normalize_field(field_name, field_data):
+        """Perform our internal normalizations in sequence and return (field_name, normalized field_data)."""
+        field_data = truncate_timestamp_precision(field_name, field_data)
+        field_data = standardize_address(field_name, field_data)
+        field_data = normalize_whitespace(field_name, field_data)
+        return field_name, field_data
+
     def compile_relevant_fields(element):
         return tuple(
-            (field, standardize_address(field, truncate_timestamp_precision(field, element.attrib[field])))
+            normalize_field(field, element.attrib[field])
             for field in RELEVANT_FIELDS
             # for some reason, backup agents may either omit fields or fill with null
             if field in element.attrib and element.attrib[field] != 'null'
@@ -150,6 +169,15 @@ def deduplicate_messages_in_tree(tree, log_file):
     data_stripped_to_original = {}  # message attributes without data fields -> original attributes
     removal_count = 0
 
+    def retrieve_message_properties_and_tag(child, args):
+        child_tag, child_attributes = child.tag, retrieve_message_properties(child, args)
+
+        if child_tag not in EXPECTED_XML_TAGS:
+            raise ValueError(f"Encountered unexpected XML tag {repr(child_tag)} directly under root. "
+                             f"Is the input file malformed?")
+
+        return child_tag, child_attributes
+
     def remove_element(element, element_tag, element_attributes, attribute_match):
         nonlocal removal_count, tree
         tree.getroot().remove(element)
@@ -157,11 +185,7 @@ def deduplicate_messages_in_tree(tree, log_file):
         removal_count += 1
 
     for child in tree.getroot().iterchildren():
-        child_tag, child_attributes = child.tag, retrieve_message_properties(child)
-
-        if child_tag not in EXPECTED_XML_TAGS:
-            raise ValueError(f"Encountered unexpected XML tag {repr(child_tag)} directly under root. "
-                             f"Is the input file malformed?")
+        child_tag, child_attributes = retrieve_message_properties_and_tag(child, args)
 
         if child_attributes in unique_messages_by_tag[child_tag]:
             # this message has a perfect match, so we drop it
@@ -178,7 +202,7 @@ def deduplicate_messages_in_tree(tree, log_file):
     # for some reason, some backup agents create duplicates without MMS
     # attachments, so we have to check for that failure mode as well
     for child in tree.getroot().iterchildren():
-        child_tag, child_attributes = child.tag, retrieve_message_properties(child)
+        child_tag, child_attributes = retrieve_message_properties_and_tag(child, args)
         if not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
             # this message has a perfect match that also includes data, so we drop it
             remove_element(child, child_tag, child_attributes, data_stripped_to_original[child_attributes])
@@ -232,12 +256,6 @@ if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
     args = parse_arguments()
     input_fp, output_fp, log_fp = args.input_file, args.output_file, args.log_file
-
-    if args.ignore_date_milliseconds:
-        TRUNCATING_DATE_PRECISION = True
-
-    if args.default_country_code:
-        DEFAULT_COUNTRY_CODE = args.default_country_code
 
     # read entire input XML file
     print(f"Reading {repr(input_fp)}... ", end='', flush=True)
