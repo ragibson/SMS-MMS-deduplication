@@ -58,7 +58,7 @@ def read_input_xml(filepath):
     return tree
 
 
-def retrieve_message_properties(child, args):
+def retrieve_message_properties(child, args, disable_ignores=False):
     """
     Returns message properties to use for uniqueness check.
 
@@ -108,14 +108,15 @@ def retrieve_message_properties(child, args):
 
     def normalize_field(field_name, field_data):
         """Perform our internal normalizations in sequence and return (field_name, normalized field_data)."""
-        field_data = truncate_timestamp_precision(field_name, field_data)
         field_data = standardize_address(field_name, field_data)
-        field_data = normalize_whitespace(field_name, field_data)
+        if not disable_ignores:
+            field_data = truncate_timestamp_precision(field_name, field_data)
+            field_data = normalize_whitespace(field_name, field_data)
         return field_name, field_data
 
     def compile_relevant_fields(element):
         relevant_deduplication_fields = RELEVANT_FIELDS
-        if args.aggressive:
+        if args.aggressive and not disable_ignores:
             relevant_deduplication_fields = AGGRESSIVE_RELEVANT_FIELDS
 
         return tuple(
@@ -140,12 +141,15 @@ def strip_data_from_message(message_attributes):
     return tuple(filter(lambda x: x[0] != 'data', message_attributes))
 
 
-def removal_summary(element_tag, element_to_remove, element_to_keep, field_length_limit=1000):
+def removal_summary(element_to_remove, element_to_keep, args, field_length_limit=1000):
     """
     Returns a string of the removed message details for logging purposes.
 
     Alongside the duplicate (removed) message, it logs the message that was kept in its place.
     """
+    element_tag = element_to_remove.tag
+    element_to_remove = retrieve_message_properties(element_to_remove, args, disable_ignores=True)
+    element_to_keep = retrieve_message_properties(element_to_keep, args, disable_ignores=True)
 
     def collect_unique_field_data(element_attributes, field):
         return " | ".join(sorted({field_data if len(field_data) < field_length_limit
@@ -164,7 +168,7 @@ def removal_summary(element_tag, element_to_remove, element_to_keep, field_lengt
     return "\n".join(removal_log) + "\n\n"
 
 
-def deduplicate_messages_in_tree(tree, log_file):
+def deduplicate_messages_in_tree(tree, log_file, args):
     """
     Removes duplicate messages from XML tree and additionally returns original/final message counts.
 
@@ -176,6 +180,7 @@ def deduplicate_messages_in_tree(tree, log_file):
     message_count_by_tag, unique_messages_by_tag = defaultdict(int), defaultdict(set)
     data_stripped_by_tag = defaultdict(set)  # tag -> message attributes without data fields
     data_stripped_to_original = {}  # message attributes without data fields -> original attributes
+    deduplication_fields_to_element = {}
     removal_count = 0
 
     def retrieve_message_properties_and_tag(child, args):
@@ -195,10 +200,10 @@ def deduplicate_messages_in_tree(tree, log_file):
 
         return child_tag, child_attributes
 
-    def remove_element(element, element_tag, element_attributes, attribute_match):
+    def remove_element(element_to_remove, element_to_keep):
         nonlocal removal_count, tree
-        tree.getroot().remove(element)
-        log_file.write(removal_summary(element_tag, element_attributes, attribute_match))
+        log_file.write(removal_summary(element_to_remove, element_to_keep, args))
+        tree.getroot().remove(element_to_remove)
         removal_count += 1
 
     for child in tree.getroot().iterchildren():
@@ -206,9 +211,10 @@ def deduplicate_messages_in_tree(tree, log_file):
 
         if child_attributes in unique_messages_by_tag[child_tag]:
             # this message has a perfect match, so we drop it
-            remove_element(child, child_tag, child_attributes, child_attributes)
+            remove_element(child, deduplication_fields_to_element[child_attributes])
         else:
             unique_messages_by_tag[child_tag].add(child_attributes)
+            deduplication_fields_to_element[child_attributes] = child
             if message_has_data(child_attributes):  # only fill in the data stripping info for messages with data
                 data_stripped_attributes = strip_data_from_message(child_attributes)
                 data_stripped_by_tag[child_tag].add(data_stripped_attributes)
@@ -222,7 +228,7 @@ def deduplicate_messages_in_tree(tree, log_file):
         child_tag, child_attributes = retrieve_message_properties_and_tag(child, args)
         if not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
             # this message has a perfect match that also includes data, so we drop it
-            remove_element(child, child_tag, child_attributes, data_stripped_to_original[child_attributes])
+            remove_element(child, deduplication_fields_to_element[data_stripped_to_original[child_attributes]])
             unique_messages_by_tag[child_tag].remove(child_attributes)
 
     # sanity check that the bookkeeping is correctly keeping track of removed messages
@@ -285,7 +291,8 @@ if __name__ == "__main__":
     with open(log_fp, "w", encoding="utf-8") as log_file:
         print(f"Searching for duplicates... ", end='', flush=True)
         st = time()
-        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(input_tree, log_file)
+        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(input_tree, log_file,
+                                                                                                args)
     print(f"Done in {time() - st:.1f} s.")
 
     # rewrite message count and ID numbers in XML tree
