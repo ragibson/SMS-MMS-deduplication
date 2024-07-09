@@ -68,10 +68,18 @@ def retrieve_message_properties(child, args, disable_ignores=False):
 
     def contains_smil(s):
         """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
-        contains_smil = s.strip().startswith("<smil") and s.strip().endswith("</smil>")
+        s = s.strip()
+        if s.startswith("<?xml") and "?>" in s and "<smil" in s and "</smil>" in s:
+            # here, we're checking for the (probable) existence of
+            #   (1) the <smil...>...</smil> tag, AND
+            #   (2) a leading XML declaration <?xml...?>
+            s = s[s.index("?>") + len("?>"):]  # strip out leading XML declaration if it exists
+
+        contains_smil = s.startswith("<smil") and s.endswith("</smil>")
         if "<" in s and ">" in s and "smil" in s and "/smil" in s:
             if not contains_smil:
-                raise RuntimeError(f"Encountered SMIL data not captured by existing check? {repr(s)}")
+                raise RuntimeError(f"This SMIL format is unique / previously unknown and "
+                                   f"not captured by the existing check? Please report: {repr(s)}")
         return contains_smil
 
     def standardize_address(field_name, field_data):
