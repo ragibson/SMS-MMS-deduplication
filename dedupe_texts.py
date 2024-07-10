@@ -74,6 +74,7 @@ def retrieve_message_properties(child, args, disable_ignores=False):
             #   (1) the <smil...>...</smil> tag, AND
             #   (2) a leading XML declaration <?xml...?>
             s = s[s.index("?>") + len("?>"):]  # strip out leading XML declaration if it exists
+        s = s.strip()  # second strip to remove potential newline after XML declaration
 
         contains_smil = s.startswith("<smil") and s.endswith("</smil>")
         if "<" in s and ">" in s and "smil" in s and "/smil" in s:

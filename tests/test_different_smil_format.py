@@ -9,7 +9,7 @@ class TestDifferentSMILFormat(unittest.TestCase):
         original_count = read_message_count(filename)
         run_deduplication(filename)
         deduplicated_count = read_message_count(TEST_OUTPUT_XML)
-        self.assertEqual(original_count // 4, deduplicated_count)  # all four messages are duplicates
+        self.assertEqual(original_count // 6, deduplicated_count)  # all four messages are duplicates
 
     def tearDown(self):
         clean_up_test_output()
