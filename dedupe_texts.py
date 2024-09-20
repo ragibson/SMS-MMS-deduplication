@@ -69,12 +69,12 @@ def retrieve_message_properties(child, args, disable_ignores=False):
     def contains_smil(s):
         """Strip out Synchronized Multimedia Integration Language data due to apparent differences in backup agents."""
         s = s.strip()
-        if s.startswith("<?xml") and "?>" in s and "<smil" in s and "</smil>" in s:
-            # here, we're checking for the (probable) existence of
-            #   (1) the <smil...>...</smil> tag, AND
-            #   (2) a leading XML declaration <?xml...?>
-            s = s[s.index("?>") + len("?>"):]  # remove leading XML declaration if it exists
-            s = s.strip()  # second strip to remove potential newline after XML declaration
+        if "<smil" in s and "</smil>" in s:
+            # we've checked for the (probable) existence of the <smil...>...</smil> tag, so we try:
+            if s.startswith("<?xml") and "?>" in s:
+                s = s[s.index("?>") + len("?>"):].strip()  # strip leading XML declaration (and newline) if it exists
+            if s.startswith("<!DOCTYPE") and ">" in s:
+                s = s[s.index(">") + len(">"):].strip()  # strip leading DOCTYPE (and newline) if it exists
 
         contains_smil = s.startswith("<smil") and s.endswith("</smil>")
         if "<" in s and ">" in s and "smil" in s and "/smil" in s:
