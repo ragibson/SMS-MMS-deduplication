@@ -11,7 +11,14 @@ def read_message_count(filepath):
     if filepath not in (TEST_OUTPUT_XML, TEST_LOG_FILE):
         filepath = os.path.join(TEST_OUTPUT_DIRECTORY, filepath)
     tree = parse(filepath, parser=XMLParser(encoding='UTF-8'))
-    return int(tree.getroot().attrib['count'])
+
+    # make sure the message count in the XML file is accurate
+    xml_count = int(tree.getroot().attrib['count'])
+    child_count = len([x for x in tree.getroot()])
+    if xml_count != child_count:
+        raise ValueError(f"XML '{filepath}' has incorrect count in <smses ...>!")
+
+    return xml_count
 
 
 def clean_up_test_output(output_log_files=(TEST_OUTPUT_XML, TEST_LOG_FILE)):
