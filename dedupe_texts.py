@@ -44,6 +44,10 @@ def parse_arguments():
 
     args = parser.parse_args()
 
+    # make sure the user's input file actually exists
+    if not os.path.exists(args.input_file):
+        raise ValueError(f"Input file '{args.input_file}' does not exist!")
+
     if not args.output_file:
         args.output_file = "_deduplicated".join(os.path.splitext(sys.argv[1]))
 
