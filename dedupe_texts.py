@@ -1,3 +1,9 @@
+# /// script
+# dependencies = [
+#   "lxml",
+# ]
+# ///
+
 import argparse
 import os
 import sys
