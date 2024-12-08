@@ -65,7 +65,14 @@ def parse_arguments():
 
 def read_input_xml(filepath):
     p = XMLParser(huge_tree=True, encoding='UTF-8')  # huge_tree is required for larger backups
-    tree = parse(filepath, parser=p)
+    with open(filepath, 'rb') as file:
+        # NOTE: lxml (and other Python XML parsing libraries) have issues with large XML files or element, usually
+        # crashing with cryptic or misleading error messages. It's suspected that this is due to poor memory management.
+        #
+        # For unknown reasons, the issue is worse on Windows systems, which fail on smaller files.
+        #
+        # Regardless, opening the file here and passing it to lxml relieves memory requirements and helps avoid crashes.
+        tree = parse(file, parser=p)
     return tree
 
 
@@ -291,8 +298,10 @@ def rewrite_tree_ids_and_count(tree, new_total):
 
 
 def write_output_xml(tree, filepath):
-    # note that the encoding, xml_declaration, and standalone tags are required to match the SMS B&R format
-    tree.write(filepath, encoding='UTF-8', xml_declaration=True, pretty_print=True, standalone=True)
+    # open the file here rather than passing a filepath to help avoid crashes, see read_input_xml() for more details
+    with open(filepath, 'wb') as file:
+        # note that the encoding, xml_declaration, and standalone tags are required to match the SMS B&R format
+        tree.write(file, encoding='UTF-8', xml_declaration=True, pretty_print=True, standalone=True)
 
 
 if __name__ == "__main__":
