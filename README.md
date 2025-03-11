@@ -64,6 +64,14 @@ Deduplication Summary:
 No duplicate messages found. Skipping writing of output file.
 ```
 
+If instead you get an `lxml.etree.XMLSyntaxError` like those below, please refer to
+[handling_extremely_large_text_messages.md](handling_extremely_large_text_messages.md).
+
+```
+lxml.etree.XMLSyntaxError: AttValue length too long, line 2, column 1000000xxx
+lxml.etree.XMLSyntaxError: Resource limit exceeded: Buffer size limit exceeded, try XML_PARSE_HUGE, line xxxxxx, column 99yyyyyyy
+```
+
 ### Log File Output
 
 The log file contains sections of the following form for each removed message.
