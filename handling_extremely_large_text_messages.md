@@ -10,7 +10,8 @@ First off, congratulations! That means you probably have at least one text messa
 and [breaks most (all?) XML parsers generally available](https://github.com/ragibson/SMS-MMS-deduplication/issues/8).
 
 Unfortunately, that also means you'll have to make a custom build of `libxml2` and `lxml` and patch in higher limits
-yourself.
+yourself, which will
+also [disable a safeguard intended to avoid integer overflow](https://gitlab.gnome.org/GNOME/libxml2/-/issues/874).
 
 > [!WARNING]
 > This is not without risk! **Do not proceed unless you are reasonably comfortable building from source and/or
@@ -39,8 +40,8 @@ python3 -m pip install setuptools Cython
 git clone https://gitlab.gnome.org/GNOME/libxml2 -b v2.13.6
 cd libxml2
 
-# change hard limit for XML element size to, e.g., 4 billion
-sed -i 's/#define XML_MAX_HUGE_LENGTH 1000000000/#define XML_MAX_HUGE_LENGTH 4000000000/' include/libxml/parserInternals.h
+# change hard limit for XML element size to, e.g., 2 billion
+sed -i 's/#define XML_MAX_HUGE_LENGTH 1000000000/#define XML_MAX_HUGE_LENGTH 2000000000/' include/libxml/parserInternals.h
 
 # configure and install libxml2
 CFLAGS='-O2 -fno-semantic-interposition' ./configure --prefix=$HOME/libxml2
