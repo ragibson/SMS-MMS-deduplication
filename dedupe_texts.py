@@ -92,6 +92,10 @@ def retrieve_message_properties(child, args, disable_ignores=False):
                 s = s[s.index("?>") + len("?>"):].strip()  # strip leading XML declaration (and newline) if it exists
             if s.startswith("<!DOCTYPE") and ">" in s:
                 s = s[s.index(">") + len(">"):].strip()  # strip leading DOCTYPE (and newline) if it exists
+            if s.startswith("<par") and "/par>" in s:
+                # strip out rare parallel timing elements as in https://www.w3.org/TR/SMIL3/smil-timing.html#edef-par
+                # probably we'll want to look through the spec for similar elements at some point
+                s = s[s.index("/par>") + len("/par>"):].strip()
 
         contains_smil = s.startswith("<smil") and s.endswith("</smil>")
         if "<" in s and ">" in s and "smil" in s and "/smil" in s:
