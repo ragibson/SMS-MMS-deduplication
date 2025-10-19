@@ -38,3 +38,15 @@ def run_deduplication(filepath, flags=''):
     # this is gross, but probably okay for such a simple tool
     os.system(f'python3 {script_location} {os.path.join(TEST_OUTPUT_DIRECTORY, filepath)} '
               f'{" ".join(output_log_files)} {flags}')
+
+
+def run_deduplication_multi(filepaths, flags=''):
+    output_log_files = [TEST_OUTPUT_XML, TEST_LOG_FILE]
+    clean_up_test_output()
+
+    script_location = "dedupe_texts.py"
+    if os.path.basename(os.getcwd()) == "tests":
+        script_location = os.path.join("..", script_location)
+
+    joined_files = " ".join(os.path.join(TEST_OUTPUT_DIRECTORY, fp) for fp in filepaths)
+    os.system(f'python3 {script_location} {joined_files} {" ".join(output_log_files)} {flags}')
