@@ -31,9 +31,14 @@ The usage of this tool is extremely simple and can handle files of several
 gigabytes in a few seconds.
 
 For example,
-
 ```commandline
 python3 dedupe_texts.py example-input.xml example-output.xml deduplication-results.log
+```
+
+You can also combine multiple input backups and deduplicate across them in a single run (useful when your messages are split across multiple files). Use -i/--input for each additional file:
+
+```commandline
+python3 dedupe_texts.py primary.xml -i secondary.xml -i tertiary.xml combined-output.xml deduplication-results.log
 ```
 
 ### Console Output
@@ -58,9 +63,9 @@ Reading 'example-input.xml'... Done in 8.1 s.
 Preparing log file 'deduplication-results.log'.
 Searching for duplicates... Done in 5.8 s.
 Deduplication Summary:
-    Message Type    |   Original Count   |      Removed       | Deduplicated Count 
-        mms         |       14341        |         0          |       14341        
-        sms         |       19676        |         0          |       19676        
+  Message Type    |   Original Count   |      Removed       | Deduplicated Count 
+    mms         |       14341        |         0          |       14341        
+    sms         |       19676        |         0          |       19676        
 No duplicate messages found. Skipping writing of output file.
 ```
 
@@ -101,6 +106,7 @@ The full usage information with a few optional features is below.
 usage: dedupe_texts.py [-h] [--default-country-code [DEFAULT_COUNTRY_CODE]]
                        [--ignore-date-milliseconds]
                        [--ignore-whitespace-differences] [--aggressive]
+                       [-i ADDITIONAL_INPUTS]
                        input_file [output_file] [log_file]
 
 Deduplicate text messages from XML backup.
@@ -116,6 +122,9 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  -i ADDITIONAL_INPUTS, --input ADDITIONAL_INPUTS
+                        Additional input XML file to include. May be provided
+                        multiple times.
   --default-country-code [DEFAULT_COUNTRY_CODE]
                         Default country code to assume if a phone number has
                         no country code. Treat phone numbers as identical if
