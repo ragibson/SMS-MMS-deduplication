@@ -1,8 +1,13 @@
 import os
+import sys
 from argparse import Namespace
 
 from lxml.etree import XMLParser, parse
-from dedupe_texts import (
+# Ensure the repository root (containing dedupe_texts.py) is on sys.path
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+from dedupe_texts import (  # noqa: E402
     read_input_xml,
     combine_input_xmls,
     deduplicate_messages_in_tree,
