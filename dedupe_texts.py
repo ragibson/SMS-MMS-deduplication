@@ -5,7 +5,6 @@
 # ///
 
 import argparse
-import copy
 import os
 from collections import defaultdict
 from time import time
@@ -110,8 +109,7 @@ def combine_input_xmls(filepaths):
         # Append only expected message elements
         for child in other_root.iterchildren():
             if child.tag in EXPECTED_XML_TAGS:
-                # Deep-copy element into base tree to avoid cross-document issues
-                base_root.append(copy.deepcopy(child))
+                base_root.append(child)
             else:
                 # Ignore any non-message children silently? Prefer strictness consistent with later checks
                 raise ValueError(f"Encountered unexpected XML tag {repr(child.tag)} directly under root in {fp}.")
