@@ -351,8 +351,7 @@ if __name__ == "__main__":
     input_fps, output_fp, log_fp = args.input_file, args.output_file, args.log_file
 
     # read and optionally combine input XML file(s)
-    to_read = input_fps if len(input_fps) > 1 else input_fps[0]
-    print(f"Reading {repr(to_read)}... ", end='', flush=True)
+    print(f"Reading {', '.join(repr(fp) for fp in input_fps)}... ", end='', flush=True)
     st = time()
     input_tree = combine_input_xmls(input_fps)
     print(f"Done in {time() - st:.1f} s.")

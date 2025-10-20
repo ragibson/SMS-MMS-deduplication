@@ -1,6 +1,4 @@
 import os
-import sys
-from argparse import Namespace
 
 from lxml.etree import XMLParser, parse
 
@@ -25,20 +23,14 @@ def read_message_count(filepath):
 
 def clean_up_test_output(output_log_files=(TEST_OUTPUT_XML, TEST_LOG_FILE)):
     for fp in output_log_files:
-        # Remove from CWD
         if os.path.exists(fp):
             os.unlink(fp)
-        # Also remove from tests/ directory if present from prior CLI-style runs
-        tests_fp = os.path.join(TEST_OUTPUT_DIRECTORY or "tests", fp)
-        if os.path.exists(tests_fp):
-            os.unlink(tests_fp)
 
 
 def run_deduplication(filepaths, flags=''):
     if isinstance(filepaths, str):
         filepaths = [filepaths]
 
-    output_log_files = [TEST_OUTPUT_XML, TEST_LOG_FILE]
     clean_up_test_output()  # sanity check that any files generated are actually from this run
 
     script_location = "dedupe_texts.py"
