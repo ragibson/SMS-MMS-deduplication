@@ -175,17 +175,8 @@ def retrieve_message_properties(child, args, disable_ignores=False):
         This is only for internal duplicate checking and does not affect the XML export.
         """
         if field_name in ('text', 'body', 'subject') and args.ignore_whitespace_differences:
-            # Normalize actual whitespace and common literal escape sequences that
-            # some backup tools embed into attributes (e.g., "\n", "\r\n", "\t").
-            # This also converts literal escape sequences into real whitespace so
-            # they'll be normalized by the split/join below. We handle the combined
-            # CRLF sequence first to avoid leaving stray "\\r" behind, then handle
-            # the individual sequences.
-            s = field_data.replace("\\r\\n", "\n")
-            s = s.replace("\\n", "\n").replace("\\r", "\n").replace("\\t", "\t")
-            # 2) Collapse any runs of whitespace (spaces, tabs, newlines, CR) to a single
-            #    ASCII space and trim leading/trailing whitespace for stable comparison.
-            field_data = " ".join(s.strip().split())
+            # in rare cases, backup agents may tweak whitespace within text messages
+            field_data = " ".join(field_data.strip().split())
         return field_data
 
     def normalize_field(field_name, field_data):
