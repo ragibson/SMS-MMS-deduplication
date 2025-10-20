@@ -25,15 +25,14 @@ def parse_arguments():
       * the log filepath is the input filepath with "_deduplication.log" appended to the filename
     """
     parser = argparse.ArgumentParser(description='Deduplicate text messages from XML backup.')
-    parser.add_argument('input_file', type=str, help='The input XML to deduplicate.')
-    parser.add_argument('output_file', type=str, nargs='?',
+    parser.add_argument('-i', '--input', dest='input_file', action='append', required=True,
+                        help='The input XML to deduplicate. May be provided multiple times.')
+    parser.add_argument('-o', '--output', dest='output_file',
                         help='The output file to save deduplicated entries. '
                              'Defaults to the input filepath with "_deduplicated" appended to the filename.')
-    parser.add_argument('log_file', type=str, nargs='?',
+    parser.add_argument('-l', '--log', dest='log_file',
                         help='The log file to record details of each removed message. '
                              'Defaults to the input filepath with "_deduplication.log" appended to the filename.')
-    parser.add_argument('-i', '--input', dest='additional_inputs', action='append', default=None,
-                    help='Additional input XML file to include. May be provided multiple times.')
     parser.add_argument('--default-country-code', nargs='?', default="+1",
                         help='Default country code to assume if a phone number has no country code. '
                              'Treat phone numbers as identical if they include this country code or none at all. '
@@ -51,21 +50,17 @@ def parse_arguments():
 
     args = parser.parse_args()
 
-    # make sure the user's input file actually exists
-    if not os.path.exists(args.input_file):
-        raise ValueError(f"Input file '{args.input_file}' does not exist!")
+    # make sure the user's input file(s) actually exists
+    for fp in args.input_file:
+        if not os.path.exists(fp):
+            raise ValueError(f"Input file '{fp}' does not exist!")
 
-    # validate additional inputs
-    addl = args.additional_inputs or []
-    missing = [fp for fp in addl if not os.path.exists(fp)]
-    if missing:
-        raise ValueError(f"Additional input file(s) do not exist: {', '.join(map(repr, missing))}")
-
+    first_input_file = args.input_file[0]
     if not args.output_file:
-        args.output_file = "_deduplicated".join(os.path.splitext(args.input_file))
+        args.output_file = "_deduplicated".join(os.path.splitext(first_input_file))
 
     if not args.log_file:
-        args.log_file = f"{os.path.splitext(args.input_file)[0]}_deduplication.log"
+        args.log_file = f"{os.path.splitext(first_input_file)[0]}_deduplication.log"
 
     return args
 
@@ -353,8 +348,7 @@ def write_output_xml(tree, filepath):
 if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
     args = parse_arguments()
-    output_fp, log_fp = args.output_file, args.log_file
-    input_fps = [args.input_file] + (args.additional_inputs or [])
+    input_fps, output_fp, log_fp = args.input_file, args.output_file, args.log_file
 
     # read and optionally combine input XML file(s)
     to_read = input_fps if len(input_fps) > 1 else input_fps[0]

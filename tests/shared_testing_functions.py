@@ -3,17 +3,6 @@ import sys
 from argparse import Namespace
 
 from lxml.etree import XMLParser, parse
-# Ensure the repository root (containing dedupe_texts.py) is on sys.path
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-from dedupe_texts import (  # noqa: E402
-    read_input_xml,
-    combine_input_xmls,
-    deduplicate_messages_in_tree,
-    rewrite_tree_ids_and_count,
-    write_output_xml,
-)
 
 TEST_OUTPUT_XML = "test_deduplicated.xml"
 TEST_LOG_FILE = "test_deduplication.log"
@@ -45,68 +34,18 @@ def clean_up_test_output(output_log_files=(TEST_OUTPUT_XML, TEST_LOG_FILE)):
             os.unlink(tests_fp)
 
 
-def _parse_flags(flags: str) -> Namespace:
-    # Defaults consistent with CLI
-    args = {
-        "default_country_code": "+1",
-        "ignore_date_milliseconds": False,
-        "ignore_whitespace_differences": False,
-        "aggressive": False,
-    }
-    tokens = flags.split()
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--default-country-code":
-            if i + 1 < len(tokens):
-                args["default_country_code"] = tokens[i + 1]
-                i += 2
-                continue
-        elif t == "--ignore-date-milliseconds":
-            args["ignore_date_milliseconds"] = True
-        elif t == "--ignore-whitespace-differences":
-            args["ignore_whitespace_differences"] = True
-        elif t == "--aggressive":
-            args["aggressive"] = True
-        i += 1
-    return Namespace(**args)
+def run_deduplication(filepaths, flags=''):
+    if isinstance(filepaths, str):
+        filepaths = [filepaths]
 
+    output_log_files = [TEST_OUTPUT_XML, TEST_LOG_FILE]
+    clean_up_test_output()  # sanity check that any files generated are actually from this run
 
-def run_deduplication(filepath, flags=""):
-    clean_up_test_output()  # ensure a clean slate
+    script_location = "dedupe_texts.py"
+    if os.path.basename(os.getcwd()) == "tests":
+        script_location = os.path.join("..", script_location)
 
-    args = _parse_flags(flags)
-    input_fp = os.path.join(TEST_OUTPUT_DIRECTORY, filepath)
-
-    # Read input and run deduplication
-    input_tree = read_input_xml(input_fp)
-    with open(TEST_LOG_FILE, "w", encoding="utf-8") as log_file:
-        output_tree, input_counts, output_counts = deduplicate_messages_in_tree(
-            input_tree, log_file, args
-        )
-
-    # Rewrite counts and write output if duplicates found
-    rewrite_tree_ids_and_count(
-        output_tree, sum(count for count in output_counts.values())
-    )
-    if input_counts != output_counts:
-        write_output_xml(output_tree, TEST_OUTPUT_XML)
-
-
-def run_deduplication_multi(filepaths, flags=""):
-    clean_up_test_output()
-
-    args = _parse_flags(flags)
-    inputs = [os.path.join(TEST_OUTPUT_DIRECTORY, fp) for fp in filepaths]
-
-    input_tree = combine_input_xmls(inputs)
-    with open(TEST_LOG_FILE, "w", encoding="utf-8") as log_file:
-        output_tree, input_counts, output_counts = deduplicate_messages_in_tree(
-            input_tree, log_file, args
-        )
-
-    rewrite_tree_ids_and_count(
-        output_tree, sum(count for count in output_counts.values())
-    )
-    if input_counts != output_counts:
-        write_output_xml(output_tree, TEST_OUTPUT_XML)
+    # this is gross, but probably okay for such a simple tool
+    os.system(f"python3 {script_location} "
+              + "".join(f" -i {os.path.join(TEST_OUTPUT_DIRECTORY, fp)}" for fp in filepaths)
+              + f" -o {TEST_OUTPUT_XML} -l {TEST_LOG_FILE} {flags}")

@@ -33,14 +33,13 @@ gigabytes in a few seconds.
 For example,
 
 ```commandline
-python3 dedupe_texts.py example-input.xml example-output.xml deduplication-results.log
+python3 dedupe_texts.py -i example-input.xml -o example-output.xml -l deduplication-results.log
 ```
 
-You can also combine and deduplicate multiple files at once with the
-`-i / --input` flag (useful when your backups are split across multiple files).
+You can also combine and deduplicate multiple files at once.
 
 ```commandline
-python3 dedupe_texts.py primary.xml -i secondary.xml -i tertiary.xml combined-output.xml deduplication-results.log
+python3 dedupe_texts.py -i primary.xml -i secondary.xml -i tertiary.xml -o combined-output.xml -l deduplication-results.log
 ```
 
 ### Console Output
@@ -105,28 +104,26 @@ In favor of keeping mms:
 The full usage information with a few optional features is below.
 
 ```
-usage: dedupe_texts.py [-h] [-i ADDITIONAL_INPUTS]
+usage: dedupe_texts.py [-h] -i INPUT_FILE [-o OUTPUT_FILE] [-l LOG_FILE]
                        [--default-country-code [DEFAULT_COUNTRY_CODE]]
                        [--ignore-date-milliseconds]
                        [--ignore-whitespace-differences] [--aggressive]
-                       input_file [output_file] [log_file]
 
 Deduplicate text messages from XML backup.
 
-positional arguments:
-  input_file            The input XML to deduplicate.
-  output_file           The output file to save deduplicated entries. Defaults
-                        to the input filepath with "_deduplicated" appended to
-                        the filename.
-  log_file              The log file to record details of each removed
-                        message. Defaults to the input filepath with
-                        "_deduplication.log" appended to the filename.
-
 options:
   -h, --help            show this help message and exit
-  -i ADDITIONAL_INPUTS, --input ADDITIONAL_INPUTS
-                        Additional input XML file to include. May be provided
-                        multiple times.
+  -i INPUT_FILE, --input INPUT_FILE
+                        The input XML to deduplicate. May be provided multiple
+                        times.
+  -o OUTPUT_FILE, --output OUTPUT_FILE
+                        The output file to save deduplicated entries. Defaults
+                        to the input filepath with "_deduplicated" appended to
+                        the filename.
+  -l LOG_FILE, --log LOG_FILE
+                        The log file to record details of each removed
+                        message. Defaults to the input filepath with
+                        "_deduplication.log" appended to the filename.
   --default-country-code [DEFAULT_COUNTRY_CODE]
                         Default country code to assume if a phone number has
                         no country code. Treat phone numbers as identical if
