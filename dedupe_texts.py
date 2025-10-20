@@ -6,7 +6,6 @@
 
 import argparse
 import os
-import sys
 from collections import defaultdict
 from time import time
 
@@ -26,11 +25,12 @@ def parse_arguments():
       * the log filepath is the input filepath with "_deduplication.log" appended to the filename
     """
     parser = argparse.ArgumentParser(description='Deduplicate text messages from XML backup.')
-    parser.add_argument('input_file', type=str, help='The input XML to deduplicate.')
-    parser.add_argument('output_file', type=str, nargs='?',
+    parser.add_argument('-i', '--input', dest='input_file', action='append', required=True,
+                        help='The input XML to deduplicate. May be provided multiple times.')
+    parser.add_argument('-o', '--output', dest='output_file',
                         help='The output file to save deduplicated entries. '
                              'Defaults to the input filepath with "_deduplicated" appended to the filename.')
-    parser.add_argument('log_file', type=str, nargs='?',
+    parser.add_argument('-l', '--log', dest='log_file',
                         help='The log file to record details of each removed message. '
                              'Defaults to the input filepath with "_deduplication.log" appended to the filename.')
     parser.add_argument('--default-country-code', nargs='?', default="+1",
@@ -50,15 +50,17 @@ def parse_arguments():
 
     args = parser.parse_args()
 
-    # make sure the user's input file actually exists
-    if not os.path.exists(args.input_file):
-        raise ValueError(f"Input file '{args.input_file}' does not exist!")
+    # make sure the user's input file(s) actually exists
+    for fp in args.input_file:
+        if not os.path.exists(fp):
+            raise ValueError(f"Input file '{fp}' does not exist!")
 
+    first_input_file = args.input_file[0]
     if not args.output_file:
-        args.output_file = "_deduplicated".join(os.path.splitext(sys.argv[1]))
+        args.output_file = "_deduplicated".join(os.path.splitext(first_input_file))
 
     if not args.log_file:
-        args.log_file = f"{os.path.splitext(sys.argv[1])[0]}_deduplication.log"
+        args.log_file = f"{os.path.splitext(first_input_file)[0]}_deduplication.log"
 
     return args
 
@@ -74,6 +76,40 @@ def read_input_xml(filepath):
         # Regardless, opening the file here and passing it to lxml relieves memory requirements and helps avoid crashes.
         tree = parse(file, parser=p)
     return tree
+
+
+def combine_input_xmls(filepaths):
+    """
+    Read one or more XML backups and combine their messages under a single root tree.
+
+    The first file acts as the base tree; all subsequent files' children (<sms> / <mms>)
+    are appended to the base tree root. The base count is not updated here; the final
+    count is rewritten after deduplication.
+    """
+    if not filepaths:
+        raise ValueError("No input files provided to combine.")
+
+    base_tree = read_input_xml(filepaths[0])
+    base_root = base_tree.getroot()
+
+    if base_root.tag != 'smses':
+        raise ValueError(f"Unexpected root tag {repr(base_root.tag)} in {filepaths[0]} (expected 'smses').")
+
+    for fp in filepaths[1:]:
+        other_tree = read_input_xml(fp)
+        other_root = other_tree.getroot()
+        if other_root.tag != 'smses':
+            raise ValueError(f"Unexpected root tag {repr(other_root.tag)} in {fp} (expected 'smses').")
+
+        # Append only expected message elements
+        for child in other_root.iterchildren():
+            if child.tag in EXPECTED_XML_TAGS:
+                base_root.append(child)
+            else:
+                # Ignore any non-message children silently? Prefer strictness consistent with later checks
+                raise ValueError(f"Encountered unexpected XML tag {repr(child.tag)} directly under root in {fp}.")
+
+    return base_tree
 
 
 def retrieve_message_properties(child, args, disable_ignores=False):
@@ -276,7 +312,7 @@ def deduplicate_messages_in_tree(tree, log_file, args):
 def print_summary(input_message_counts, output_message_counts):
     """Prints summary of deduplicated message counts to stdout."""
     if input_message_counts.keys() != output_message_counts.keys():
-        raise RuntimeError(f"Message type (MMS/SMS) was completely lost in deduplication? This should never occur!")
+        raise RuntimeError("Message type (MMS/SMS) was completely lost in deduplication? This should never occur!")
 
     print("Deduplication Summary:")
     print("|".join(f"{x:^20}" for x in ["Message Type", "Original Count", "Removed", "Deduplicated Count"]))
@@ -312,21 +348,22 @@ def write_output_xml(tree, filepath):
 if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
     args = parse_arguments()
-    input_fp, output_fp, log_fp = args.input_file, args.output_file, args.log_file
+    input_fps, output_fp, log_fp = args.input_file, args.output_file, args.log_file
 
-    # read entire input XML file
-    print(f"Reading {repr(input_fp)}... ", end='', flush=True)
+    # read and optionally combine input XML file(s)
+    print(f"Reading {', '.join(repr(fp) for fp in input_fps)}... ", end='', flush=True)
     st = time()
-    input_tree = read_input_xml(input_fp)
+    input_tree = combine_input_xmls(input_fps)
     print(f"Done in {time() - st:.1f} s.")
 
     # search for duplicate messages and remove them from the XML tree
     print(f"Preparing log file {repr(log_fp)}.")
     with open(log_fp, "w", encoding="utf-8") as log_file:
-        print(f"Searching for duplicates... ", end='', flush=True)
+        print("Searching for duplicates... ", end='', flush=True)
         st = time()
-        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(input_tree, log_file,
-                                                                                                args)
+        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(
+            input_tree, log_file, args
+        )
     print(f"Done in {time() - st:.1f} s.")
 
     # rewrite message count and ID numbers in XML tree
@@ -337,7 +374,7 @@ if __name__ == "__main__":
 
     # write the trimmed XML tree to the output file (if any duplicates were removed)
     if input_message_counts == output_message_counts:
-        print(f"No duplicate messages found. Skipping writing of output file.")
+        print("No duplicate messages found. Skipping writing of output file.")
     else:
         print(f"Writing {repr(output_fp)}... ", end='', flush=True)
         st = time()

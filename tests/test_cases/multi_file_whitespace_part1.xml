@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<smses count="2" type="full">
+    <sms protocol="0" address="+11111111111" date="1600000000000" type="1" subject="null" body="Line 1&#10;Line 2"/>
+    <mms date="1700000000000" address="+11111111111">
+        <parts>
+            <part seq="0" ct="text/plain" chset="106" text="Line 1&#10;Line 2"/>
+        </parts>
+        <addrs>
+            <addr address="+11111111110" type="137" charset="106"/>
+            <addr address="1111111111" type="151" charset="106"/>
+        </addrs>
+    </mms>
+</smses>
