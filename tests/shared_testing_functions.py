@@ -28,6 +28,11 @@ def clean_up_test_output(output_log_files=(TEST_OUTPUT_XML, TEST_LOG_FILE)):
 
 
 def run_deduplication(filepaths, flags=''):
+    """
+    Runs the deduplication script on the given filepaths and flags.
+
+    A single filepath can be provided as a string, or multiple filepaths as a list of strings.
+    """
     if isinstance(filepaths, str):
         filepaths = [filepaths]
 
