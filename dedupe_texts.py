@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from time import time
 
-from lxml.etree import XMLParser, parse, iterparse, Element, tostring, fromstring, indent
+from lxml.etree import XMLParser, parse, iterparse, Element, tostring, indent
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
@@ -89,8 +89,6 @@ def stream_input_xmls(filepaths):
                     yield elem, fp
                     # Clear the element to free memory after processing
                     elem.clear()
-                    while elem.getprevious() is not None:
-                        del elem.getparent()[0]
             
             if not root_seen:
                 raise ValueError(f"No root 'smses' element found in {fp}.")
@@ -193,21 +191,14 @@ def strip_data_from_message(message_attributes):
     return tuple(filter(lambda x: x[0] != 'data', message_attributes))
 
 
-def removal_summary(element_xml, element_to_keep_xml, args, field_length_limit=1000):
+def removal_summary(element_to_remove_attrs, element_to_keep_attrs, tag_remove, tag_keep, args, field_length_limit=1000):
     """
     Returns a string of the removed message details for logging purposes.
 
     Alongside the duplicate (removed) message, it logs the message that was kept in its place.
     
-    element_xml and element_to_keep_xml are XML strings representing the elements.
+    Takes message attribute tuples rather than XML strings to avoid re-parsing.
     """
-    # Parse the XML strings back to elements for processing
-    element_to_remove = parse_xml_string(element_xml)
-    element_to_keep = parse_xml_string(element_to_keep_xml)
-    
-    tag_remove, tag_keep = element_to_remove.tag, element_to_keep.tag
-    element_to_remove = retrieve_message_properties(element_to_remove, args, disable_ignores=True)
-    element_to_keep = retrieve_message_properties(element_to_keep, args, disable_ignores=True)
 
     def collect_unique_field_data(element_attributes, field):
         return " | ".join(sorted({field_data if len(field_data) < field_length_limit
@@ -215,8 +206,8 @@ def removal_summary(element_xml, element_to_keep_xml, args, field_length_limit=1
                                   for field_name, field_data in element_attributes if field == field_name}))
 
     removal_log = []
-    for intro_str, element in [(f"Removing {tag_remove}:", element_to_remove),
-                               (f"\nIn favor of keeping {tag_keep}:", element_to_keep)]:
+    for intro_str, element in [(f"Removing {tag_remove}:", element_to_remove_attrs),
+                               (f"\nIn favor of keeping {tag_keep}:", element_to_keep_attrs)]:
         removal_log.append(intro_str)
         for field in RELEVANT_FIELDS:
             combined_field_data = collect_unique_field_data(element, field)
@@ -224,11 +215,6 @@ def removal_summary(element_xml, element_to_keep_xml, args, field_length_limit=1
                 removal_log.append(f"{field:>8}: {combined_field_data}")
 
     return "\n".join(removal_log) + "\n\n"
-
-
-def parse_xml_string(xml_string):
-    """Parse an XML string back to an element."""
-    return fromstring(xml_string)
 
 
 def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
@@ -249,7 +235,8 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
     unique_messages_by_tag = defaultdict(set)
     data_stripped_by_tag = defaultdict(set)
     data_stripped_to_original = {}
-    deduplication_fields_to_xml = {}  # Store minimal XML string instead of element
+    # Store tag and attributes (for logging) instead of full XML strings
+    deduplication_fields_to_info = {}  # attrs -> (tag, attrs_for_logging)
     messages_to_skip = set()  # Track message indices to skip (0-indexed)
     
     def retrieve_message_properties_and_tag(child, args):
@@ -274,27 +261,29 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
     for elem, fp in stream_input_xmls(input_fps):
         child_tag, child_attributes = retrieve_message_properties_and_tag(elem, args)
         
-        # Serialize element to string for later logging if needed
-        elem_xml = tostring(elem, encoding='unicode')
+        # Get attributes for logging (with disable_ignores=True)
+        attrs_for_logging = retrieve_message_properties(elem, args, disable_ignores=True)
         
         is_duplicate = False
         
         # Check for exact duplicate
         if child_attributes in unique_messages_by_tag[child_tag]:
             messages_to_skip.add(message_index)
-            log_file.write(removal_summary(elem_xml, deduplication_fields_to_xml[child_attributes], args))
+            kept_tag, kept_attrs = deduplication_fields_to_info[child_attributes]
+            log_file.write(removal_summary(attrs_for_logging, kept_attrs, child_tag, kept_tag, args))
             is_duplicate = True
         # Check for data-stripped duplicate (message without data matching one with data)
         elif not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
             messages_to_skip.add(message_index)
             original_attrs = data_stripped_to_original[child_attributes]
-            log_file.write(removal_summary(elem_xml, deduplication_fields_to_xml[original_attrs], args))
+            kept_tag, kept_attrs = deduplication_fields_to_info[original_attrs]
+            log_file.write(removal_summary(attrs_for_logging, kept_attrs, child_tag, kept_tag, args))
             is_duplicate = True
         
         # If not a duplicate, track it
         if not is_duplicate:
             unique_messages_by_tag[child_tag].add(child_attributes)
-            deduplication_fields_to_xml[child_attributes] = elem_xml
+            deduplication_fields_to_info[child_attributes] = (child_tag, attrs_for_logging)
             
             # Track data-stripped version for future comparison
             if message_has_data(child_attributes):
@@ -305,14 +294,17 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
         message_count_by_tag[child_tag] += 1
         message_index += 1
     
+    # Calculate unique count before second pass
+    unique_count = sum(len(v) for v in unique_messages_by_tag.values())
+    
     # Second pass: Write unique messages to output
     message_index = 0
     running_id = 0
     
     with open(output_fp, 'wb') as out_file:
-        # Write XML declaration and opening root tag (with placeholder count)
+        # Write XML declaration and opening root tag with correct count
         out_file.write(b'<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?>\n')
-        out_file.write(b'<smses count="PLACEHOLDER_COUNT" type="full">\n')
+        out_file.write(f'<smses count="{unique_count}" type="full">\n'.encode('UTF-8'))
         
         for elem, fp in stream_input_xmls(input_fps):
             if message_index not in messages_to_skip:
@@ -323,28 +315,19 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
                         running_id += 1
                 
                 # Write element to output
-                # Use indent to set proper indentation, then serialize without pretty_print to preserve it
+                # Use indent to set proper indentation, then serialize
                 indent(elem, space='    ')
                 elem_str = tostring(elem, encoding='UTF-8', pretty_print=False)
-                # Add 4-space indent to all lines
-                lines = elem_str.split(b'\n')
+                # Add 4-space base indent to all lines
+                lines = elem_str.rstrip().split(b'\n')
                 for line in lines:
-                    if line.strip():
-                        out_file.write(b'    ' + line + b'\n')
+                    out_file.write(b'    ')
+                    out_file.write(line)
+                    out_file.write(b'\n')
             
             message_index += 1
         
         out_file.write(b'</smses>\n')
-    
-    # Update count in output file
-    unique_count = sum(len(v) for v in unique_messages_by_tag.values())
-    with open(output_fp, 'r+b') as out_file:
-        content = out_file.read()
-        content = content.replace(b'count="PLACEHOLDER_COUNT"', 
-                                  f'count="{unique_count}"'.encode('UTF-8'))
-        out_file.seek(0)
-        out_file.write(content)
-        out_file.truncate()
     
     return message_count_by_tag, {k: len(v) for k, v in unique_messages_by_tag.items()}
 
