@@ -316,14 +316,10 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
         
         for elem, fp in stream_input_xmls(input_fps):
             if message_index not in messages_to_skip:
-                # Update _id if present
-                if "_id" in elem.attrib:
-                    elem.attrib["_id"] = str(running_id)
-                
-                # Update _id in nested elements (for MMS)
-                for nested_elem in elem.iter():
-                    if "_id" in nested_elem.attrib and nested_elem.tag != elem.tag:
-                        nested_elem.attrib["_id"] = str(running_id)
+                # Update _id for this element and all nested elements
+                for it in elem.iter():
+                    if "_id" in it.attrib:
+                        it.attrib["_id"] = str(running_id)
                         running_id += 1
                 
                 # Write element to output
@@ -335,8 +331,6 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
                 for line in lines:
                     if line.strip():
                         out_file.write(b'    ' + line + b'\n')
-                
-                running_id += 1
             
             message_index += 1
         
