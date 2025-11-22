@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from time import time
 
-from lxml.etree import XMLParser, parse, iterparse, Element, tostring, indent
+from lxml.etree import XMLParser, parse, iterparse, Element, ElementTree, tostring, indent
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
@@ -63,6 +63,23 @@ def parse_arguments():
         args.log_file = f"{os.path.splitext(first_input_file)[0]}_deduplication.log"
 
     return args
+
+
+def get_root_metadata(filepath):
+    """
+    Extract XML declaration and root element metadata from the first input file.
+    
+    Returns a dict with 'root_attribs' containing all root element attributes.
+    """
+    with open(filepath, 'rb') as file:
+        context = iterparse(file, events=('start',), tag='smses')
+        for event, elem in context:
+            # Capture root element attributes
+            root_attribs = dict(elem.attrib)
+            elem.clear()
+            return {'root_attribs': root_attribs}
+    
+    raise ValueError(f"No root 'smses' element found in {filepath}.")
 
 
 def stream_input_xmls(filepaths):
@@ -223,9 +240,10 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
     
     Uses a two-pass approach:
     1. First pass: Identify all duplicates (exact matches and data-stripped duplicates)
-    2. Second pass: Write unique messages to output file
+    2. Second pass: Build tree with unique messages and write using lxml
     
-    This keeps only deduplication dicts in memory, not full XML elements.
+    This keeps only deduplication dicts in memory during first pass, then only unique messages
+    in memory during second pass (instead of all messages including duplicates).
     
     Returns:
         1) total_message_count_by_tag dict
@@ -294,40 +312,37 @@ def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
         message_count_by_tag[child_tag] += 1
         message_index += 1
     
-    # Calculate unique count before second pass
-    unique_count = sum(len(v) for v in unique_messages_by_tag.values())
+    # Get root metadata from first input file
+    root_metadata = get_root_metadata(input_fps[0])
     
-    # Second pass: Write unique messages to output
+    # Second pass: Build tree with unique messages only
+    from lxml.etree import Element, ElementTree
+    root = Element('smses', **root_metadata['root_attribs'])
+    
     message_index = 0
     running_id = 0
     
-    with open(output_fp, 'wb') as out_file:
-        # Write XML declaration and opening root tag with correct count
-        out_file.write(b'<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?>\n')
-        out_file.write(f'<smses count="{unique_count}" type="full">\n'.encode('UTF-8'))
-        
-        for elem, fp in stream_input_xmls(input_fps):
-            if message_index not in messages_to_skip:
-                # Update _id for this element and all nested elements
-                for it in elem.iter():
-                    if "_id" in it.attrib:
-                        it.attrib["_id"] = str(running_id)
-                        running_id += 1
-                
-                # Write element to output
-                # Use indent to set proper indentation, then serialize
-                indent(elem, space='    ')
-                elem_str = tostring(elem, encoding='UTF-8', pretty_print=False)
-                # Add 4-space base indent to all lines
-                lines = elem_str.rstrip().split(b'\n')
-                for line in lines:
-                    out_file.write(b'    ')
-                    out_file.write(line)
-                    out_file.write(b'\n')
+    for elem, fp in stream_input_xmls(input_fps):
+        if message_index not in messages_to_skip:
+            # Update _id for this element and all nested elements
+            for it in elem.iter():
+                if "_id" in it.attrib:
+                    it.attrib["_id"] = str(running_id)
+                    running_id += 1
             
-            message_index += 1
+            # Append to root
+            root.append(elem)
         
-        out_file.write(b'</smses>\n')
+        message_index += 1
+    
+    # Update count in root element
+    unique_count = sum(len(v) for v in unique_messages_by_tag.values())
+    root.attrib['count'] = str(unique_count)
+    
+    # Write tree to output using lxml's write method (preserves all XML metadata)
+    tree = ElementTree(root)
+    with open(output_fp, 'wb') as out_file:
+        tree.write(out_file, encoding='UTF-8', xml_declaration=True, pretty_print=True, standalone=True)
     
     return message_count_by_tag, {k: len(v) for k, v in unique_messages_by_tag.items()}
 
