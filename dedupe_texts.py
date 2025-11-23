@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from time import time
 
-from lxml.etree import XMLParser, parse
+from lxml.etree import XMLParser, parse, iterparse, tostring, indent
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
@@ -110,6 +110,64 @@ def combine_input_xmls(filepaths):
                 raise ValueError(f"Encountered unexpected XML tag {repr(child.tag)} directly under root in {fp}.")
 
     return base_tree
+
+
+def stream_input_xmls(filepaths):
+    """
+    Stream XML elements from one or more input files using iterparse.
+    
+    Yields (element, filepath, message_index) tuples for each message element.
+    Uses huge_tree=True parser for large file support.
+    """
+    if not filepaths:
+        raise ValueError("No input files provided.")
+
+    p = XMLParser(huge_tree=True, encoding='UTF-8')
+    message_index = 0
+    
+    for fp in filepaths:
+        with open(fp, 'rb') as file:
+            # Note: iterparse doesn't accept parser argument directly in all lxml versions
+            # We rely on default parser which should handle huge trees
+            context = iterparse(file, events=('start', 'end'), tag=('smses', 'sms', 'mms'), huge_tree=True)
+            
+            root_seen = False
+            for event, elem in context:
+                if event == 'start' and elem.tag == 'smses':
+                    if root_seen:
+                        raise ValueError(f"Multiple root elements in {fp}?")
+                    root_seen = True
+                elif event == 'end' and elem.tag in EXPECTED_XML_TAGS:
+                    yield elem, fp, message_index
+                    message_index += 1
+                    # Clear element after yielding to free memory
+                    elem.clear()
+                    # Also clear previous siblings to free more memory
+                    while elem.getprevious() is not None:
+                        try:
+                            del elem.getparent()[0]
+                        except:
+                            break
+            
+            if not root_seen:
+                raise ValueError(f"No root 'smses' element found in {fp}.")
+
+
+def get_root_info_streaming(filepath):
+    """
+    Extract root element info from first input file using streaming.
+    Returns the raw bytes of the opening root tag and its attributes dict.
+    """
+    p = XMLParser(huge_tree=True, encoding='UTF-8')
+    
+    with open(filepath, 'rb') as file:
+        context = iterparse(file, events=('start',), tag='smses', huge_tree=True)
+        for event, elem in context:
+            root_attribs = dict(elem.attrib)
+            elem.clear()
+            return root_attribs
+    
+    raise ValueError(f"No root 'smses' element found in {filepath}.")
 
 
 def retrieve_message_properties(child, args, disable_ignores=False):
@@ -309,6 +367,160 @@ def deduplicate_messages_in_tree(tree, log_file, args):
     return tree, message_count_by_tag, {k: len(v) for k, v in unique_messages_by_tag.items()}
 
 
+def deduplicate_messages_streaming(input_fps, output_fp, log_file, args):
+    """
+    Stream-based deduplication that minimizes memory usage.
+    
+    Pass 1: Stream all inputs, identify duplicates (store only minimal metadata)
+    Pass 2: Stream all inputs again, write unique messages directly to output
+    
+    This uses O(n) memory for metadata only, not full XML elements.
+    """
+    message_count_by_tag = defaultdict(int)
+    unique_messages_by_tag = defaultdict(set)
+    data_stripped_by_tag = defaultdict(set)
+    data_stripped_to_original = {}
+    # Store minimal info for logging: message index -> (tag, attributes for logging)
+    message_info_for_logging = {}
+    # Track which message indices to skip
+    messages_to_skip = set()
+    
+    def retrieve_message_properties_and_tag(child, args):
+        child_tag, child_attributes = child.tag, retrieve_message_properties(child, args)
+
+        if child_tag not in EXPECTED_XML_TAGS:
+            raise ValueError(f"Encountered unexpected XML tag {repr(child_tag)} directly under root. "
+                             f"Is the input file malformed?")
+
+        if args.aggressive:
+            assert len(AGGRESSIVE_RELEVANT_FIELDS) == 4
+            child_tag = ' or '.join(EXPECTED_XML_TAGS)
+            child_attributes = tuple({('text' if x[0] in ('text', 'body') else x[0],) + x[1:]
+                                      for x in child_attributes})
+
+        return child_tag, child_attributes
+    
+    # PASS 1: Identify duplicates
+    for elem, fp, msg_idx in stream_input_xmls(input_fps):
+        child_tag, child_attributes = retrieve_message_properties_and_tag(elem, args)
+        
+        # Store logging info for this message
+        attrs_for_logging = retrieve_message_properties(elem, args, disable_ignores=True)
+        message_info_for_logging[msg_idx] = (child_tag, attrs_for_logging)
+        
+        is_duplicate = False
+        kept_msg_idx = None
+        
+        # Check for exact duplicate
+        if child_attributes in unique_messages_by_tag[child_tag]:
+            is_duplicate = True
+            # Find the kept message index
+            for idx, (tag, attrs) in message_info_for_logging.items():
+                if idx not in messages_to_skip:
+                    test_tag, test_attrs = retrieve_message_properties_and_tag_from_stored(tag, attrs, args)
+                    if test_tag == child_tag and test_attrs == child_attributes:
+                        kept_msg_idx = idx
+                        break
+        # Check for data-stripped duplicate
+        elif not message_has_data(child_attributes) and child_attributes in data_stripped_by_tag[child_tag]:
+            is_duplicate = True
+            original_attrs = data_stripped_to_original[child_attributes]
+            # Find the kept message index
+            for idx, (tag, attrs) in message_info_for_logging.items():
+                if idx not in messages_to_skip:
+                    test_tag, test_attrs = retrieve_message_properties_and_tag_from_stored(tag, attrs, args)
+                    if test_tag == child_tag and test_attrs == original_attrs:
+                        kept_msg_idx = idx
+                        break
+        
+        if is_duplicate:
+            messages_to_skip.add(msg_idx)
+            if kept_msg_idx is not None:
+                kept_tag, kept_attrs = message_info_for_logging[kept_msg_idx]
+                # Write log entry
+                log_file.write(removal_summary_from_attrs(attrs_for_logging, kept_attrs, child_tag, kept_tag, args))
+        else:
+            unique_messages_by_tag[child_tag].add(child_attributes)
+            if message_has_data(child_attributes):
+                data_stripped_attributes = strip_data_from_message(child_attributes)
+                data_stripped_by_tag[child_tag].add(data_stripped_attributes)
+                data_stripped_to_original[data_stripped_attributes] = child_attributes
+        
+        message_count_by_tag[child_tag] += 1
+    
+    # Calculate final count
+    unique_count = sum(len(v) for v in unique_messages_by_tag.values())
+    
+    # Get root attributes from first file
+    root_attribs = get_root_info_streaming(input_fps[0])
+    root_attribs['count'] = str(unique_count)
+    
+    # PASS 2: Write output
+    running_id = 0
+    
+    with open(output_fp, 'wb') as out_file:
+        # Write XML declaration (matching lxml's tree.write format)
+        out_file.write(b"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>\n")
+        
+        # Write root opening tag with attributes
+        root_attrs_str = ' '.join(f'{k}="{v}"' for k, v in root_attribs.items())
+        out_file.write(f'<smses {root_attrs_str}>\n'.encode('UTF-8'))
+        
+        # Stream and write unique messages
+        for elem, fp, msg_idx in stream_input_xmls(input_fps):
+            if msg_idx not in messages_to_skip:
+                # Update _id attributes
+                for it in elem.iter():
+                    if "_id" in it.attrib:
+                        it.attrib["_id"] = str(running_id)
+                        running_id += 1
+                
+                # Apply proper indentation (4 spaces)
+                indent(elem, space='    ')
+                # Serialize element
+                elem_bytes = tostring(elem, encoding='UTF-8')
+                # Write with base 4-space indentation
+                for line in elem_bytes.split(b'\n'):
+                    if line.strip():
+                        out_file.write(b'    ' + line + b'\n')
+        
+        # Write closing tag with indentation matching original
+        out_file.write(b'    </smses>\n')
+    
+    return message_count_by_tag, {k: len(v) for k, v in unique_messages_by_tag.items()}
+
+
+def retrieve_message_properties_and_tag_from_stored(tag, attrs, args):
+    """Helper to reconstruct tag/attributes from stored logging info."""
+    # attrs are already the full attributes, just need to apply aggressive logic if needed
+    if args.aggressive:
+        tag = ' or '.join(EXPECTED_XML_TAGS)
+        attrs = tuple({('text' if x[0] in ('text', 'body') else x[0],) + x[1:] for x in attrs})
+    return tag, attrs
+
+
+def removal_summary_from_attrs(element_to_remove_attrs, element_to_keep_attrs, tag_remove, tag_keep, args, field_length_limit=1000):
+    """
+    Returns a string of the removed message details for logging purposes.
+    Works with attribute tuples instead of XML elements.
+    """
+    def collect_unique_field_data(element_attributes, field):
+        return " | ".join(sorted({field_data if len(field_data) < field_length_limit
+                                  else f"<LENGTH {len(field_data)} OMISSION>"
+                                  for field_name, field_data in element_attributes if field == field_name}))
+
+    removal_log = []
+    for intro_str, element in [(f"Removing {tag_remove}:", element_to_remove_attrs),
+                               (f"\nIn favor of keeping {tag_keep}:", element_to_keep_attrs)]:
+        removal_log.append(intro_str)
+        for field in RELEVANT_FIELDS:
+            combined_field_data = collect_unique_field_data(element, field)
+            if combined_field_data:
+                removal_log.append(f"{field:>8}: {combined_field_data}")
+
+    return "\n".join(removal_log) + "\n\n"
+
+
 def print_summary(input_message_counts, output_message_counts):
     """Prints summary of deduplicated message counts to stdout."""
     if input_message_counts.keys() != output_message_counts.keys():
@@ -350,33 +562,22 @@ if __name__ == "__main__":
     args = parse_arguments()
     input_fps, output_fp, log_fp = args.input_file, args.output_file, args.log_file
 
-    # read and optionally combine input XML file(s)
-    print(f"Reading {', '.join(repr(fp) for fp in input_fps)}... ", end='', flush=True)
-    st = time()
-    input_tree = combine_input_xmls(input_fps)
-    print(f"Done in {time() - st:.1f} s.")
-
-    # search for duplicate messages and remove them from the XML tree
+    # Use streaming deduplication
+    print(f"Reading {', '.join(repr(fp) for fp in input_fps)}...")
     print(f"Preparing log file {repr(log_fp)}.")
     with open(log_fp, "w", encoding="utf-8") as log_file:
-        print("Searching for duplicates... ", end='', flush=True)
+        print("Searching for duplicates and writing output... ", end='', flush=True)
         st = time()
-        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(
-            input_tree, log_file, args
+        input_message_counts, output_message_counts = deduplicate_messages_streaming(
+            input_fps, output_fp, log_file, args
         )
-    print(f"Done in {time() - st:.1f} s.")
-
-    # rewrite message count and ID numbers in XML tree
-    rewrite_tree_ids_and_count(output_tree, sum(count for tag, count in output_message_counts.items()))
+        print(f"Done in {time() - st:.1f} s.")
 
     # print summary of original and final message counts
     print_summary(input_message_counts, output_message_counts)
 
-    # write the trimmed XML tree to the output file (if any duplicates were removed)
+    # Remove output file if no duplicates were found
     if input_message_counts == output_message_counts:
-        print("No duplicate messages found. Skipping writing of output file.")
-    else:
-        print(f"Writing {repr(output_fp)}... ", end='', flush=True)
-        st = time()
-        write_output_xml(output_tree, output_fp)
-        print(f"Done in {time() - st:.1f} s")
+        print("No duplicate messages found. Removing output file.")
+        if os.path.exists(output_fp):
+            os.unlink(output_fp)
