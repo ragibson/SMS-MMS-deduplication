@@ -1,3 +1,8 @@
+# File explicitly tagged for git ignore
+*_gitignore.*
+*-gitignore.*
+*-gitignore/
+
 # Any deduplication or log files
 *_deduplicated.xml
 *_deduplication.log

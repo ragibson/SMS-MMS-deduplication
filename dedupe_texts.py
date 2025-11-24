@@ -344,7 +344,6 @@ def write_output_xml(tree, filepath):
         # note that the encoding, xml_declaration, and standalone tags are required to match the SMS B&R format
         tree.write(file, encoding='UTF-8', xml_declaration=True, pretty_print=True, standalone=True)
 
-
 if __name__ == "__main__":
     # read in I/O filepaths from command line arguments
     args = parse_arguments()
