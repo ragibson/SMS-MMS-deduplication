@@ -1,6 +1,7 @@
 import unittest
 
-from shared_testing_functions import run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output
+from shared_testing_functions import (run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output,
+                                      check_all_elements_unedited)
 
 
 class TestDifferentSMILFormat(unittest.TestCase):
@@ -10,6 +11,7 @@ class TestDifferentSMILFormat(unittest.TestCase):
         run_deduplication(filename)
         deduplicated_count = read_message_count(TEST_OUTPUT_XML)
         self.assertEqual(1, deduplicated_count)  # all messages are duplicates
+        self.assertTrue(check_all_elements_unedited(filename, TEST_OUTPUT_XML))
 
     def tearDown(self):
         clean_up_test_output()

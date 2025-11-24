@@ -1,7 +1,8 @@
 import os
 import unittest
 
-from shared_testing_functions import run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output
+from shared_testing_functions import (run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output,
+                                      check_all_elements_unedited)
 
 
 class TestCrossMessageProtocol(unittest.TestCase):
@@ -16,6 +17,7 @@ class TestCrossMessageProtocol(unittest.TestCase):
         run_deduplication(filename, flags="--aggressive")
         deduplicated_count = read_message_count(TEST_OUTPUT_XML)
         self.assertEqual(original_count // 2, deduplicated_count)  # just a single duplicate
+        self.assertTrue(check_all_elements_unedited(filename, TEST_OUTPUT_XML))
 
     def tearDown(self):
         clean_up_test_output()

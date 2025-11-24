@@ -1,7 +1,8 @@
 import os
 import unittest
 
-from shared_testing_functions import run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output
+from shared_testing_functions import (run_deduplication, read_message_count, TEST_OUTPUT_XML, clean_up_test_output,
+                                      check_all_elements_unedited)
 
 
 class TestCountryCodes(unittest.TestCase):
@@ -16,6 +17,7 @@ class TestCountryCodes(unittest.TestCase):
         run_deduplication(filename, flags="--default-country-code +2")
         deduplicated_count = read_message_count(TEST_OUTPUT_XML)
         self.assertEqual(original_count // 2, deduplicated_count)  # one SMS and one MMS duplicate
+        self.assertTrue(check_all_elements_unedited(filename, TEST_OUTPUT_XML))
 
     def test_missing_country_code(self, filename='test_cases/missing_country_code.xml'):
         """Check that missing +1 country code is correctly identified as a duplicate."""
@@ -23,6 +25,7 @@ class TestCountryCodes(unittest.TestCase):
         run_deduplication(filename)
         deduplicated_count = read_message_count(TEST_OUTPUT_XML)
         self.assertEqual(original_count // 2, deduplicated_count)  # one SMS and one MMS duplicate
+        self.assertTrue(check_all_elements_unedited(filename, TEST_OUTPUT_XML))
 
     def tearDown(self):
         clean_up_test_output()
