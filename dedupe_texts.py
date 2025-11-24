@@ -209,6 +209,7 @@ def first_pass_compute_deduplication(filepaths, log_file, args):
         2) message_count_by_tag: dict of original message counts
         3) unique_message_count_by_tag: dict of deduplicated message counts
         4) root_attribs: dict of root element attributes from first file
+        5) header_comments: list of XML comments before root element
     """
     import hashlib
     
@@ -224,6 +225,7 @@ def first_pass_compute_deduplication(filepaths, log_file, args):
     elements_to_remove = []
     
     root_attribs = None
+    header_comments = []  # XML comments before root element
     
     def hash_attributes(attrs):
         """Hash attribute tuple to save memory instead of storing full tuple."""
@@ -248,11 +250,18 @@ def first_pass_compute_deduplication(filepaths, log_file, args):
     
     for file_idx, filepath in enumerate(filepaths):
         with open(filepath, 'rb') as file:
-            context = iterparse(file, events=('start', 'end'), huge_tree=True)
+            context = iterparse(file, events=('start', 'end', 'comment'), huge_tree=True)
             elem_idx = 0
+            seen_root = False
             
             for event, elem in context:
+                # Capture comments before root element (from first file only)
+                if event == 'comment' and not seen_root and file_idx == 0:
+                    header_comments.append(elem.text)
+                    continue
+                
                 if event == 'start' and elem.tag == 'smses':
+                    seen_root = True
                     if root_attribs is None:
                         root_attribs = dict(elem.attrib)
                     if elem.tag != 'smses':
@@ -327,7 +336,7 @@ def first_pass_compute_deduplication(filepaths, log_file, args):
     # Rebuild final list of elements to keep
     elements_to_keep = sorted(elements_to_keep_set)
     
-    return elements_to_keep, message_count_by_tag, {k: len(v) for k, v in unique_message_hashes_by_tag.items()}, root_attribs
+    return elements_to_keep, message_count_by_tag, {k: len(v) for k, v in unique_message_hashes_by_tag.items()}, root_attribs, header_comments
 
 
 def write_removal_log(filepaths, elements_to_remove, log_file, args):
@@ -394,12 +403,13 @@ def write_removal_log(filepaths, elements_to_remove, log_file, args):
         element_cache.clear()
 
 
-def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_attribs, final_count):
+def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_attribs, final_count, header_comments):
     """
     Second streaming pass: write only the kept messages to output.
     
     Writes elements directly using lxml's incremental XML writer without building a tree in memory.
     Post-processes to add the standalone attribute to the XML declaration.
+    Preserves XML comments from the input file header.
     """
     from io import BytesIO
     import tempfile
@@ -415,6 +425,7 @@ def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_
             root_attribs['count'] = str(final_count)
             
             with xf.element('smses', root_attribs):
+                first_elem = True
                 for file_idx, filepath in enumerate(filepaths):
                     with open(filepath, 'rb') as infile:
                         context = iterparse(infile, events=('end',), huge_tree=True)
@@ -436,8 +447,22 @@ def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_
                                             child.attrib['_id'] = str(running_id)
                                             running_id += 1
                                     
+                                    # Strip tail whitespace to avoid extra blank lines
+                                    original_tail = elem.tail
+                                    elem.tail = None
+                                    
+                                    # Add newline and indentation before element
+                                    if first_elem:
+                                        xf.write('\n    ')
+                                        first_elem = False
+                                    else:
+                                        xf.write('\n    ')
+                                    
                                     # Write element directly without building a tree
-                                    xf.write(elem, pretty_print=True)
+                                    xf.write(elem, pretty_print=False)
+                                    
+                                    # Restore tail for memory cleanup
+                                    elem.tail = original_tail
                                 
                                 elem_idx += 1
                                 
@@ -445,8 +470,11 @@ def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_
                                 elem.clear()
                                 while elem.getprevious() is not None:
                                     del elem.getparent()[0]
+                
+                # Add final newline before closing tag
+                xf.write('\n    ')
     
-    # Read the temp file and add XML declaration with standalone='yes'
+    # Read the temp file and add XML declaration with standalone='yes' and comments
     with open(temp_filepath, 'rb') as temp_file:
         xml_content = temp_file.read()
     
@@ -454,10 +482,16 @@ def second_pass_write_output(filepaths, elements_to_keep, output_filepath, root_
     import os
     os.unlink(temp_filepath)
     
-    # Add XML declaration
+    # Build final output with declaration and comments
     with open(output_filepath, 'wb') as f:
         f.write(b"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>\n")
+        # Add header comments if any
+        for comment_text in header_comments:
+            f.write(f'<!--{comment_text}-->\n'.encode('UTF-8'))
         f.write(xml_content)
+        # Ensure file ends with newline
+        if not xml_content.endswith(b'\n'):
+            f.write(b'\n')
 
 
 def print_summary(input_message_counts, output_message_counts):
@@ -486,7 +520,7 @@ if __name__ == "__main__":
         print(f"Preparing log file {repr(log_fp)}.")
         print("Searching for duplicates... ", end='', flush=True)
         st = time()
-        elements_to_keep, input_message_counts, output_message_counts, root_attribs = \
+        elements_to_keep, input_message_counts, output_message_counts, root_attribs, header_comments = \
             first_pass_compute_deduplication(input_fps, log_file, args)
     
     print(f"Done in {time() - st:.1f} s.")
@@ -501,5 +535,5 @@ if __name__ == "__main__":
         print(f"Writing {repr(output_fp)}... ", end='', flush=True)
         st = time()
         final_count = sum(count for tag, count in output_message_counts.items())
-        second_pass_write_output(input_fps, elements_to_keep, output_fp, root_attribs, final_count)
+        second_pass_write_output(input_fps, elements_to_keep, output_fp, root_attribs, final_count, header_comments)
         print(f"Done in {time() - st:.1f} s")
