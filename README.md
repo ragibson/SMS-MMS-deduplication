@@ -108,6 +108,7 @@ usage: dedupe_texts.py [-h] -i INPUT_FILE [-o OUTPUT_FILE] [-l LOG_FILE]
                        [--default-country-code [DEFAULT_COUNTRY_CODE]]
                        [--ignore-date-milliseconds]
                        [--ignore-whitespace-differences] [--aggressive]
+                       [--fix-utf16]
 
 Deduplicate text messages from XML backup.
 
@@ -141,6 +142,8 @@ options:
                         identifying duplicates. Treat any matching messages as
                         duplicates, regardless of address, messaging protocol
                         (SMS, MMS, RCS, etc.), or other fields.
+  --fix-utf16           Preprocess input files to fix invalid UTF-16 surrogate
+                        pairs.
 ```
 
 <a name = "ImportantWarning"></a>
