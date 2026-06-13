@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<smses count="2" type="full">
+    <sms protocol="0" address="+11111111111" date="1600000000000" type="1" subject="null"
+         body="Some text content here 😂"/>
+    <sms protocol="0" address="+11111111111" date="1600000000000" type="1" subject="null"
+         body="Some text content here 😂"/>
+</smses>

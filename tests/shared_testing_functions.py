@@ -1,6 +1,7 @@
 import os
+import re
 
-from lxml.etree import XMLParser, parse
+from lxml.etree import XMLParser, parse, XMLSyntaxError
 
 TEST_OUTPUT_XML = "test_deduplicated.xml"
 TEST_LOG_FILE = "test_deduplication.log"
@@ -10,13 +11,19 @@ TEST_OUTPUT_DIRECTORY = "tests" if os.path.basename(os.getcwd()) != "tests" else
 def read_message_count(filepath):
     if filepath not in (TEST_OUTPUT_XML, TEST_LOG_FILE):
         filepath = os.path.join(TEST_OUTPUT_DIRECTORY, filepath)
-    tree = parse(filepath, parser=XMLParser(encoding="UTF-8"))
 
-    # make sure the message count in the XML file is accurate
-    xml_count = int(tree.getroot().attrib["count"])
-    child_count = len([x for x in tree.getroot()])
-    if xml_count != child_count:
-        raise ValueError(f"XML '{filepath}' has incorrect count in <smses ...>!")
+    try:
+        tree = parse(filepath, parser=XMLParser(encoding="UTF-8"))
+
+        # make sure the message count in the XML file is accurate
+        xml_count = int(tree.getroot().attrib["count"])
+        child_count = len([x for x in tree.getroot()])
+        if xml_count != child_count:
+            raise ValueError(f"XML '{filepath}' has incorrect count in <smses ...>!")
+    except XMLSyntaxError:
+        # have to read count directly since this is an invalid XML file
+        with open(filepath, 'r') as file:
+            xml_count = int(re.search(r'count="(\d+)"', file.read()).group(1))
 
     return xml_count
 

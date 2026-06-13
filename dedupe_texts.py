@@ -6,10 +6,12 @@
 
 import argparse
 import os
+import re
 from collections import defaultdict
+from io import BytesIO
 from time import time
 
-from lxml.etree import XMLParser, parse
+from lxml.etree import XMLParser, XMLSyntaxError, parse
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
@@ -47,6 +49,8 @@ def parse_arguments():
                         help='Only consider timestamp and body/text/data in identifying duplicates. Treat any matching '
                              'messages as duplicates, regardless of address, messaging protocol (SMS, MMS, RCS, etc.), '
                              'or other fields.')
+    parser.add_argument('--fix-utf16', action='store_true',
+                        help='Preprocess input files to fix invalid UTF-16 surrogate pairs.')
 
     args = parser.parse_args()
 
@@ -65,20 +69,56 @@ def parse_arguments():
     return args
 
 
-def read_input_xml(filepath):
+def fix_utf16_surrogate_pairs(xml_content):
+    """
+    Repair invalid XMLs that contain surrogate pairs.
+
+    From https://en.wikipedia.org/wiki/UTF-16,
+        High surrogates are 0xD800-0xDBFF
+        Low surrogates are 0xDC00-0xDFFF
+
+    We need to combine these back into a single codepoint.
+        U' = yyyyyyyyyyxxxxxxxxxx  // U - 0x10000
+        W1 = 110110yyyyyyyyyy      // 0xD800 + yyyyyyyyyy
+        W2 = 110111xxxxxxxxxx      // 0xDC00 + xxxxxxxxxx
+    """
+
+    def replace_surrogate_pair(match):
+        high, low = int(match.group(1)), int(match.group(2))
+        if 0xD800 <= high <= 0xDBFF and 0xDC00 <= low <= 0xDFFF:
+            codepoint = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)
+            return f'&#{codepoint};'
+        return match.group(0)
+
+    surrogate_re = re.compile(r'&#(\d+);&#(\d+);')
+    return surrogate_re.sub(replace_surrogate_pair, xml_content)
+
+
+def read_input_xml(filepath, fix_utf16=False):
     p = XMLParser(huge_tree=True, encoding='UTF-8')  # huge_tree is required for larger backups
-    with open(filepath, 'rb') as file:
-        # NOTE: lxml (and other Python XML parsing libraries) have issues with large XML files or element, usually
-        # crashing with cryptic or misleading error messages. It's suspected that this is due to poor memory management.
-        #
-        # For unknown reasons, the issue is worse on Windows systems, which fail on smaller files.
-        #
-        # Regardless, opening the file here and passing it to lxml relieves memory requirements and helps avoid crashes.
-        tree = parse(file, parser=p)
+
+    # NOTE: lxml (and other Python XML parsing libraries) have issues with large XML files or element, usually
+    # crashing with cryptic or misleading error messages. It's suspected that this is due to poor memory management.
+    #
+    # For unknown reasons, the issue is worse on Windows systems, which fail on smaller files.
+    #
+    # Regardless, opening the file here and passing it to lxml relieves memory requirements and helps avoid crashes.
+    if fix_utf16:
+        with open(filepath, 'r', encoding='UTF-8') as file:
+            repaired_xml = fix_utf16_surrogate_pairs(file.read())
+            tree = parse(BytesIO(repaired_xml.encode('UTF-8')), parser=p)
+    else:
+        with open(filepath, 'rb') as file:
+            try:
+                tree = parse(file, parser=p)
+            except XMLSyntaxError as e:
+                raise ValueError(f"Input file '{filepath}' is an illegal XML file! "
+                                 f"You may want to try rerunning with the --fix-utf16 flag.") from e
+
     return tree
 
 
-def combine_input_xmls(filepaths):
+def combine_input_xmls(filepaths, fix_utf16=False):
     """
     Read one or more XML backups and combine their messages under a single root tree.
 
@@ -89,14 +129,14 @@ def combine_input_xmls(filepaths):
     if not filepaths:
         raise ValueError("No input files provided to combine.")
 
-    base_tree = read_input_xml(filepaths[0])
+    base_tree = read_input_xml(filepaths[0], fix_utf16=fix_utf16)
     base_root = base_tree.getroot()
 
     if base_root.tag != 'smses':
         raise ValueError(f"Unexpected root tag {repr(base_root.tag)} in {filepaths[0]} (expected 'smses').")
 
     for fp in filepaths[1:]:
-        other_tree = read_input_xml(fp)
+        other_tree = read_input_xml(fp, fix_utf16=fix_utf16)
         other_root = other_tree.getroot()
         if other_root.tag != 'smses':
             raise ValueError(f"Unexpected root tag {repr(other_root.tag)} in {fp} (expected 'smses').")
@@ -353,7 +393,7 @@ if __name__ == "__main__":
     # read and optionally combine input XML file(s)
     print(f"Reading {', '.join(repr(fp) for fp in input_fps)}... ", end='', flush=True)
     st = time()
-    input_tree = combine_input_xmls(input_fps)
+    input_tree = combine_input_xmls(input_fps, fix_utf16=args.fix_utf16)
     print(f"Done in {time() - st:.1f} s.")
 
     # search for duplicate messages and remove them from the XML tree
