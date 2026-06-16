@@ -16,6 +16,7 @@ For example, we handle instances where
 * The internal [SMIL data](https://en.wikipedia.org/wiki/Synchronized_Multimedia_Integration_Language)
   format varies, but the message content and data are otherwise identical
 * The internal storage fields are inconsistently omitted or `null`
+* The XML file is malformed due to invalid UTF-16 surrogate pairs
 
 These conflicts tend to occur when using multiple backup agents over time or
 simultaneously. E.g., accidentally recovering data from Google's backups
