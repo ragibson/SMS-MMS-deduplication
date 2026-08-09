@@ -5,13 +5,15 @@
 # ///
 
 import argparse
+import hashlib
 import os
 import re
+import tempfile
 from collections import defaultdict
 from io import BytesIO
 from time import time
 
-from lxml.etree import XMLParser, XMLSyntaxError, parse
+from lxml.etree import XMLParser, XMLSyntaxError, iterparse, parse, xmlfile
 
 EXPECTED_XML_TAGS = {'sms', 'mms'}  # treat any direct child tags other than this as a fatal error
 RELEVANT_FIELDS = ['date', 'address', 'body', 'text', 'subject', 'm_type', 'type', 'data']
@@ -51,6 +53,9 @@ def parse_arguments():
                              'or other fields.')
     parser.add_argument('--fix-utf16', action='store_true',
                         help='Preprocess input files to fix invalid UTF-16 surrogate pairs.')
+    parser.add_argument('--verify-duplicates', action='store_true',
+                        help='Compare complete normalized message properties instead of compact hash summaries. '
+                             'This avoids hash collisions but retains message contents in memory.')
 
     args = parser.parse_args()
 
@@ -92,6 +97,34 @@ def fix_utf16_surrogate_pairs(xml_content):
 
     surrogate_re = re.compile(r'&#(\d+);&#(\d+);')
     return surrogate_re.sub(replace_surrogate_pair, xml_content)
+
+
+def open_streaming_input(filepath, fix_utf16=False):
+    """Open input bytes, optionally repairing UTF-16 entities into a temporary file."""
+    if not fix_utf16:
+        return open(filepath, 'rb'), None
+    temporary = tempfile.NamedTemporaryFile(mode='w+b', delete=False)
+    try:
+        with open(filepath, 'r', encoding='UTF-8') as source:
+            remainder = ''
+            while chunk := source.read(1024 * 1024):
+                content = remainder + chunk
+                # Keep only an entity that crosses this chunk boundary, not all
+                # content after the last entity in an otherwise huge message.
+                incomplete_entity = re.search(r'&#\d*;?$', content)
+                if incomplete_entity is None:
+                    temporary.write(fix_utf16_surrogate_pairs(content).encode('UTF-8'))
+                    remainder = ''
+                else:
+                    temporary.write(fix_utf16_surrogate_pairs(content[:incomplete_entity.start()]).encode('UTF-8'))
+                    remainder = incomplete_entity.group()
+            temporary.write(fix_utf16_surrogate_pairs(remainder).encode('UTF-8'))
+        temporary.close()
+        return open(temporary.name, 'rb'), temporary.name
+    except Exception:
+        temporary.close()
+        os.unlink(temporary.name)
+        raise
 
 
 def read_input_xml(filepath, fix_utf16=False):
@@ -276,6 +309,149 @@ def removal_summary(element_to_remove, element_to_keep, args, field_length_limit
     return "\n".join(removal_log) + "\n\n"
 
 
+def message_summary(element, args, field_length_limit=1000):
+    """Return a bounded log representation, so logs do not retain MMS payloads."""
+    attributes = retrieve_message_properties(element, args, disable_ignores=True)
+    lines = []
+    for field in RELEVANT_FIELDS:
+        values = sorted({value if len(value) < field_length_limit else f"<LENGTH {len(value)} OMISSION>"
+                         for name, value in attributes if name == field})
+        if values:
+            lines.append(f"{field:>8}: {' | '.join(values)}")
+    return "\n".join(lines)
+
+
+def iter_input_messages(filepath, fix_utf16=False):
+    """Yield direct message children while releasing each parsed element promptly."""
+    source, temporary_path = open_streaming_input(filepath, fix_utf16)
+
+    try:
+        context = iterparse(source, events=('start', 'end'), huge_tree=True, encoding='UTF-8')
+        root = None
+        for event, element in context:
+            if root is None and event == 'start':
+                root = element
+                if root.tag != 'smses':
+                    raise ValueError(f"Unexpected root tag {root.tag!r} in {filepath} (expected 'smses').")
+            if event != 'end' or element.getparent() is not root:
+                continue
+            if element.tag not in EXPECTED_XML_TAGS:
+                raise ValueError(f"Encountered unexpected XML tag {element.tag!r} directly under root in {filepath}.")
+            yield element
+            element.clear()
+            while element.getprevious() is not None:
+                del element.getparent()[0]
+    except XMLSyntaxError as e:
+        raise ValueError(f"Input file '{filepath}' is an illegal XML file! "
+                         "You may want to try rerunning with the --fix-utf16 flag.") from e
+    finally:
+        source.close()
+        if temporary_path:
+            os.unlink(temporary_path)
+
+
+def dedupe_tag_and_properties(child, args):
+    tag, properties = child.tag, retrieve_message_properties(child, args)
+    if tag not in EXPECTED_XML_TAGS:
+        raise ValueError(f"Encountered unexpected XML tag {tag!r} directly under root.")
+    if args.aggressive:
+        tag = ' or '.join(EXPECTED_XML_TAGS)
+        properties = tuple({('text' if name in ('text', 'body') else name, value) for name, value in properties})
+    return tag, properties
+
+
+def message_key(child, args):
+    """Return a full key only for collision verification; otherwise retain a fixed-size digest."""
+    tag, properties = dedupe_tag_and_properties(child, args)
+    if args.verify_duplicates:
+        return tag, properties
+    return tag, hashlib.blake2b(repr(properties).encode('utf-8'), digest_size=16).digest()
+
+
+def stripped_key(key, properties, args):
+    properties = strip_data_from_message(properties)
+    if args.verify_duplicates:
+        return key[0], properties
+    return key[0], hashlib.blake2b(repr(properties).encode('utf-8'), digest_size=16).digest()
+
+
+def root_attributes(filepath, fix_utf16=False):
+    """Read only the root start tag for the streamed output document."""
+    source, temporary_path = open_streaming_input(filepath, fix_utf16)
+    try:
+        for _, root in iterparse(source, events=('start',), huge_tree=True, encoding='UTF-8'):
+            if root.tag != 'smses':
+                raise ValueError(f"Unexpected root tag {root.tag!r} in {filepath} (expected 'smses').")
+            return dict(root.attrib)
+    finally:
+        source.close()
+        if temporary_path:
+            os.unlink(temporary_path)
+
+
+def stream_deduplicate(filepaths, output_filepath, log_filepath, args):
+    """Detect duplicates with compact keys, then write logs and XML without retaining trees."""
+    counts, unique_counts = defaultdict(int), defaultdict(int)
+    seen, data_by_stripped, attachment_removals, keep_summaries = set(), {}, set(), {}
+
+    for filepath in filepaths:
+        for child in iter_input_messages(filepath, args.fix_utf16):
+            key = message_key(child, args)
+            counts[key[0]] += 1
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_counts[key[0]] += 1
+            _, properties = dedupe_tag_and_properties(child, args)
+            if message_has_data(properties):
+                data_by_stripped[stripped_key(key, properties, args)] = key
+            # Bounded log details preserve useful diagnostics without retaining message payloads.
+            keep_summaries[key] = (child.tag, message_summary(child, args))
+
+    # Find no-data survivors that have a corresponding data-bearing survivor.
+    for filepath in filepaths:
+        for child in iter_input_messages(filepath, args.fix_utf16):
+            key = message_key(child, args)
+            _, properties = dedupe_tag_and_properties(child, args)
+            if key in seen and not message_has_data(properties) and stripped_key(key, properties, args) in data_by_stripped:
+                attachment_removals.add(key)
+
+    for key in attachment_removals:
+        unique_counts[key[0]] -= 1
+
+    if counts == unique_counts:
+        with open(log_filepath, 'w', encoding='utf-8'):
+            pass
+        return counts, unique_counts
+
+    root_attrib = root_attributes(filepaths[0], args.fix_utf16)
+    root_attrib['count'] = str(sum(unique_counts.values()))
+    running_id = 0
+    emitted = set()
+    with open(log_filepath, 'w', encoding='utf-8') as log_file, open(output_filepath, 'wb') as output_file:
+        with xmlfile(output_file, encoding='UTF-8') as output:
+            output.write_declaration(standalone=True)
+            with output.element('smses', root_attrib):
+                for filepath in filepaths:
+                    for child in iter_input_messages(filepath, args.fix_utf16):
+                        key = message_key(child, args)
+                        duplicate = key in emitted or key in attachment_removals
+                        if duplicate:
+                            _, properties = dedupe_tag_and_properties(child, args)
+                            kept_key = data_by_stripped.get(stripped_key(key, properties, args), key)
+                            kept_tag, kept_summary = keep_summaries[kept_key]
+                            log_file.write(f"Removing {child.tag}:\n{message_summary(child, args)}\n\n"
+                                           f"In favor of keeping {kept_tag}:\n{kept_summary}\n\n")
+                            continue
+                        emitted.add(key)
+                        for element in child.iter():
+                            if '_id' in element.attrib:
+                                element.attrib['_id'] = str(running_id)
+                                running_id += 1
+                        output.write(child)
+    return counts, unique_counts
+
+
 def deduplicate_messages_in_tree(tree, log_file, args):
     """
     Removes duplicate messages from XML tree and additionally returns original/final message counts.
@@ -390,24 +566,13 @@ if __name__ == "__main__":
     args = parse_arguments()
     input_fps, output_fp, log_fp = args.input_file, args.output_file, args.log_file
 
-    # read and optionally combine input XML file(s)
+    # Scan inputs and write results without retaining their XML trees.
     print(f"Reading {', '.join(repr(fp) for fp in input_fps)}... ", end='', flush=True)
     st = time()
-    input_tree = combine_input_xmls(input_fps, fix_utf16=args.fix_utf16)
-    print(f"Done in {time() - st:.1f} s.")
-
-    # search for duplicate messages and remove them from the XML tree
     print(f"Preparing log file {repr(log_fp)}.")
-    with open(log_fp, "w", encoding="utf-8") as log_file:
-        print("Searching for duplicates... ", end='', flush=True)
-        st = time()
-        output_tree, input_message_counts, output_message_counts = deduplicate_messages_in_tree(
-            input_tree, log_file, args
-        )
+    print("Searching for duplicates... ", end='', flush=True)
+    input_message_counts, output_message_counts = stream_deduplicate(input_fps, output_fp, log_fp, args)
     print(f"Done in {time() - st:.1f} s.")
-
-    # rewrite message count and ID numbers in XML tree
-    rewrite_tree_ids_and_count(output_tree, sum(count for tag, count in output_message_counts.items()))
 
     # print summary of original and final message counts
     print_summary(input_message_counts, output_message_counts)
@@ -416,7 +581,4 @@ if __name__ == "__main__":
     if input_message_counts == output_message_counts:
         print("No duplicate messages found. Skipping writing of output file.")
     else:
-        print(f"Writing {repr(output_fp)}... ", end='', flush=True)
-        st = time()
-        write_output_xml(output_tree, output_fp)
-        print(f"Done in {time() - st:.1f} s")
+        print(f"Wrote {repr(output_fp)} while streaming duplicate results.")
