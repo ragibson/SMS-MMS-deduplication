@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 
 from lxml.etree import XMLParser, parse, XMLSyntaxError
 
@@ -83,6 +84,6 @@ def run_deduplication(filepaths, flags=''):
         script_location = os.path.join("..", script_location)
 
     # this is gross, but probably okay for such a simple tool
-    os.system(f"python3 {script_location} "
+    os.system(f'"{sys.executable}" {script_location} '
               + "".join(f" -i {os.path.join(TEST_OUTPUT_DIRECTORY, fp)}" for fp in filepaths)
               + f" -o {TEST_OUTPUT_XML} -l {TEST_LOG_FILE} {flags}")

@@ -309,7 +309,7 @@ def deduplicate_messages_in_tree(tree, log_file, args):
         return child_tag, child_attributes
 
     def remove_element(element_to_remove, element_to_keep):
-        nonlocal removal_count, tree
+        nonlocal removal_count
         log_file.write(removal_summary(element_to_remove, element_to_keep, args))
         tree.getroot().remove(element_to_remove)
         removal_count += 1

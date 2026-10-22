@@ -1,0 +1,6 @@
+[tool.coverage.run]
+include = ["dedupe_texts.py"]
+parallel = true
+
+[tool.coverage.report]
+fail_under = 85
