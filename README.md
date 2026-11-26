@@ -48,7 +48,6 @@ python3 dedupe_texts.py -i primary.xml -i secondary.xml -i tertiary.xml -o combi
 This will produce output of the following form.
 
 ```
-Reading 'example-input.xml'... Done in 8.1 s.
 Preparing log file 'deduplication-results.log'.
 Searching for duplicates... Done in 5.9 s.
 Deduplication Summary:
@@ -61,7 +60,6 @@ Writing 'example-output.xml'... Done in 3.8 s
 or
 
 ```
-Reading 'example-input.xml'... Done in 8.1 s.
 Preparing log file 'deduplication-results.log'.
 Searching for duplicates... Done in 5.8 s.
 Deduplication Summary:
@@ -109,7 +107,7 @@ usage: dedupe_texts.py [-h] -i INPUT_FILE [-o OUTPUT_FILE] [-l LOG_FILE]
                        [--default-country-code [DEFAULT_COUNTRY_CODE]]
                        [--ignore-date-milliseconds]
                        [--ignore-whitespace-differences] [--aggressive]
-                       [--fix-utf16]
+                       [--fix-utf16] [--verify-duplicates]
 
 Deduplicate text messages from XML backup.
 
@@ -144,8 +142,15 @@ options:
                         duplicates, regardless of address, messaging protocol
                         (SMS, MMS, RCS, etc.), or other fields.
   --fix-utf16           Preprocess input files to fix invalid UTF-16 surrogate
-                        pairs.
+                         pairs.
+  --verify-duplicates   Compare full message properties instead of hashes.
+                        Uses more memory for large messages.
 ```
+
+By default, the tool keeps fixed-size SHA-256 summaries for distinct messages and
+processes message payloads in chunks. Use `--verify-duplicates` to compare the
+complete normalized properties and rule out hash collisions. Both modes stream
+the backup and removal log; allow disk space for temporary files and any output.
 
 <a name = "ImportantWarning"></a>
 
